@@ -1,0 +1,61 @@
+.zone {
+  border: 2px dashed var(--color-border, #ccc);
+  border-radius: var(--radius, 8px);
+  padding: var(--space-3xl, 2rem);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.zone:hover {
+  border-color: var(--color-primary, #0066cc);
+  background: var(--color-primary-overlay, rgba(0, 102, 204, 0.05));
+}
+
+.zoneScanning {
+  border-color: var(--color-primary, #0066cc);
+  background: var(--color-primary-overlay, rgba(0, 102, 204, 0.05));
+  cursor: wait;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md, 1rem);
+}
+
+.icon {
+  width: 64px;
+  height: 64px;
+  color: var(--color-text-muted, #666);
+}
+
+.zoneScanning .icon {
+  color: var(--color-primary, #0066cc);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.subtitle {
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #666);
+  margin: 0.25rem 0 0;
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #666);
+  margin: 0;
+}

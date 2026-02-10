@@ -1,0 +1,55 @@
+.card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  padding: var(--space-md) var(--space-lg);
+  box-shadow: var(--shadow);
+  margin-bottom: var(--space-md);
+  border: 1px solid var(--color-border);
+}
+
+.label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-sm);
+}
+
+.input,
+.textarea {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--color-bg-soft);
+  color: var(--color-text);
+  font-family: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.input:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-overlay);
+}
+
+.lowConfidence .input,
+.lowConfidence .textarea {
+  background: var(--color-low-confidence);
+}
+
+.card.filled .input,
+.card.filled .textarea {
+  border-color: var(--color-primary);
+  background: var(--color-primary-overlay);
+}

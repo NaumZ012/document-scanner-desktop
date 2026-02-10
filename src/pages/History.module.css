@@ -1,0 +1,510 @@
+.page {
+  padding: 0;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2xl);
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text);
+  letter-spacing: -0.02em;
+}
+
+.nav {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.nav button {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  color: var(--color-text);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.nav button:hover {
+  background: var(--color-primary-overlay);
+  border-color: var(--color-border);
+}
+
+.filters {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-2xl);
+}
+
+.searchInput {
+  flex: 1;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-overlay);
+}
+
+.folderNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xl);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.folderTab,
+.folderTabActive {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.folderTab:hover {
+  background: var(--color-primary-overlay);
+  color: var(--color-text);
+}
+
+.folderTabActive {
+  background: var(--color-primary-overlay);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  font-weight: 600;
+}
+
+.folderTabWrap {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.folderTabWrap .folderTab,
+.folderTabWrap .folderTabActive {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.folderTabWrap .folderTabActive {
+  background: var(--color-primary-overlay);
+  color: var(--color-primary);
+}
+
+.folderTabDelete {
+  padding: var(--space-sm) var(--space-xs);
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.folderTabDelete:hover {
+  color: var(--color-error);
+}
+
+.loading,
+.empty {
+  color: var(--color-text-muted);
+  margin: var(--space-lg) 0;
+  padding: var(--space-lg);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  padding: var(--space-lg) var(--space-xl);
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.table th {
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  background: var(--color-bg-soft);
+  border-bottom: 2px solid var(--color-border-strong);
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: var(--space-xl);
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: var(--space-xl);
+}
+
+.table td {
+  color: var(--color-text);
+}
+
+.table tbody tr {
+  transition: background 0.15s;
+}
+
+.table tbody tr:hover {
+  background: var(--color-row-hover);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.nameCell {
+  font-weight: 500;
+  color: var(--color-text);
+  max-width: 280px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.typeCell {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.dateCell {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.actionsCol {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.reviewBtn {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  border-radius: var(--radius);
+  transition: background 0.2s;
+}
+
+.reviewBtn:hover {
+  background: var(--color-primary-hover);
+}
+
+.fileCell {
+  max-width: 200px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.status {
+  font-size: 12px;
+  font-weight: 500;
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 6px;
+  background: var(--color-bg-soft);
+  color: var(--color-text-muted);
+}
+
+.status.added_to_excel {
+  background: #dcfce7;
+  color: var(--color-success);
+}
+
+.status.error {
+  background: #fee2e2;
+  color: var(--color-error);
+}
+
+.exportBtn {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 13px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.exportBtn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.exportBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.addBtn {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 14px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  border-radius: var(--radius);
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.addBtn:hover {
+  background: var(--color-primary-hover);
+}
+
+.actionsCell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.moveSelect {
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg-soft);
+  color: var(--color-text);
+  min-width: 120px;
+}
+
+.moveSelect:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.editBtn {
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 12px;
+  background: var(--color-bg-soft);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.editBtn:hover {
+  background: var(--color-primary-overlay);
+  border-color: var(--color-border);
+}
+
+.deleteBtn {
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 12px;
+  background: transparent;
+  color: var(--color-error);
+  border: 1px solid var(--color-error);
+  border-radius: 6px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.deleteBtn:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.deleteBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Modal */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  box-sizing: border-box;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow);
+  max-width: 480px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--space-xl);
+}
+
+.modalTitle {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 var(--space-lg);
+  color: var(--color-text);
+}
+
+.modal .form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.modal .label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.modal .input,
+.modal .textarea {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--color-bg-soft);
+  color: var(--color-text);
+  font-family: inherit;
+}
+
+.modal .textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.modal .input:focus,
+.modal .textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-overlay);
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.cancelBtn {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 14px;
+  background: var(--color-bg-soft);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.cancelBtn:hover {
+  background: var(--color-primary-overlay);
+  border-color: var(--color-border);
+}
+
+.saveBtn {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  border-radius: var(--radius);
+  transition: background 0.2s;
+}
+
+.saveBtn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.saveBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-lg);
+  margin-top: var(--space-xl);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.paginationBtn {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 14px;
+  background: var(--color-bg-soft);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.paginationBtn:hover:not(:disabled) {
+  background: var(--color-primary-overlay);
+  border-color: var(--color-primary);
+}
+
+.paginationBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.paginationInfo {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}

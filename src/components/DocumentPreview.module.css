@@ -1,0 +1,148 @@
+.preview {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: box-shadow 0.25s, border-color 0.25s;
+}
+
+.preview:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary);
+}
+
+.previewFrame {
+  position: relative;
+  height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.embed {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background: var(--color-bg-soft);
+}
+
+.clickHint {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  color: white;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.placeholder {
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.placeholder .fileName {
+  font-size: 12px;
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zoomOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  box-sizing: border-box;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.zoomContent {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  max-width: 95vw;
+  max-height: 95vh;
+  width: 900px;
+  height: 85vh;
+  overflow: hidden;
+}
+
+.zoomHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.zoomTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zoomClose {
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--color-text);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.zoomClose:hover {
+  background: var(--color-primary-overlay);
+  border-color: var(--color-primary);
+}
+
+.zoomFrame {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.zoomEmbed {
+  width: 100%;
+  height: 100%;
+  border: none;
+}

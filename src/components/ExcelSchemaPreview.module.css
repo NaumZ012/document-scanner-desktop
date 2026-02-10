@@ -1,0 +1,104 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md, 1rem);
+}
+
+.card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  border: 1px solid var(--color-border);
+}
+
+.cardTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 var(--space-sm);
+  color: var(--color-text);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  font-size: 0.875rem;
+}
+
+.label {
+  color: var(--color-text-muted);
+}
+
+.value {
+  margin-left: 0.5rem;
+  font-family: ui-monospace, monospace;
+}
+
+.valueHighlight {
+  margin-left: 0.5rem;
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  color: var(--color-success, #0a0);
+}
+
+.columnList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.columnRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+}
+
+.columnBadge {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+}
+
+.columnInfo {
+  flex: 1;
+}
+
+.columnHeader {
+  font-weight: 500;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.columnType {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: 0.125rem 0 0;
+}
+
+.check {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--color-success, #0a0);
+  flex-shrink: 0;
+}
+
+.infoCard {
+  padding: var(--space-md);
+  border-radius: var(--radius);
+  background: var(--color-primary-overlay, rgba(0, 102, 204, 0.08));
+  border: 1px solid var(--color-border);
+}
+
+.infoText {
+  font-size: 0.875rem;
+  margin: 0;
+  color: var(--color-text);
+}

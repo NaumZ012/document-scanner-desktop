@@ -1,0 +1,88 @@
+.wrapper {
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+}
+
+.meta {
+  margin-bottom: var(--space-md);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.metaRow {
+  margin-bottom: var(--space-xs);
+}
+
+.metaLabel {
+  font-weight: 600;
+  margin-right: var(--space-xs);
+}
+
+.loading,
+.error,
+.empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.error {
+  color: var(--color-error);
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.th,
+.td {
+  border: 1px solid var(--color-border);
+  padding: var(--space-sm) var(--space-md);
+  text-align: left;
+  cursor: pointer;
+  min-width: 80px;
+  max-width: 180px;
+}
+
+.th:hover,
+.td:hover {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.th.mapped,
+.td.mapped {
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  border-color: var(--color-success);
+}
+
+.th.mapped:hover,
+.td.mapped:hover {
+  background: color-mix(in srgb, var(--color-success) 25%, transparent);
+}
+
+.th.selected,
+.td.selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+.colLetter {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.td {
+  font-size: 14px;
+  color: var(--color-text);
+  word-break: break-word;
+}
