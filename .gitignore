@@ -6,3 +6,20 @@ src-tauri/target/
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
+
+# Example documents and large binary files (we only want code in Git)
+example/
+
+# Office temp files and workbooks
+~$*
+*.xlsx
+*.xlsm
+*.xlsb
+*.xls
+
+# PDFs (sample invoices, reports, etc.)
+*.pdf
+
+# Local databases and generated data
+*.db
+src-tauri/**/invoice_scanner.db
