@@ -25,12 +25,12 @@ export async function runOcr(filePath: string): Promise<OcrResult> {
   return invoke<OcrResult>("run_ocr", { filePath });
 }
 
-export async function runOcrInvoice(filePath: string): Promise<InvoiceData> {
-  return invoke<InvoiceData>("run_ocr_invoice", { filePath });
+export async function runOcrInvoice(filePath: string, documentType?: string): Promise<InvoiceData> {
+  return invoke<InvoiceData>("run_ocr_invoice", { filePath, documentType: documentType ?? null });
 }
 
-export async function batchScanInvoices(pdfPaths: string[]): Promise<InvoiceData[]> {
-  return invoke<InvoiceData[]>("batch_scan_invoices", { pdfPaths });
+export async function batchScanInvoices(pdfPaths: string[], documentType?: string): Promise<import("@/shared/types").BatchScanResult> {
+  return invoke<import("@/shared/types").BatchScanResult>("batch_scan_invoices", { pdfPaths, documentType: documentType ?? null });
 }
 
 export async function exportInvoicesToExcel(

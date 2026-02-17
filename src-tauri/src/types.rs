@@ -57,4 +57,22 @@ pub struct InvoiceData {
     /// Original PDF filename (set by batch_scan_invoices).
     #[serde(default)]
     pub source_file: Option<String>,
+    /// Full file path for preview (set by batch_scan_invoices).
+    #[serde(default)]
+    pub source_file_path: Option<String>,
+}
+
+/// Information about a failed scan attempt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailedScan {
+    pub file_path: String,
+    pub file_name: String,
+    pub error: String,
+}
+
+/// Result of batch scanning, containing both successful and failed scans.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchScanResult {
+    pub successes: Vec<InvoiceData>,
+    pub failures: Vec<FailedScan>,
 }

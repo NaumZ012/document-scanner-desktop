@@ -1,19 +1,32 @@
 import { useState, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Receipt, Calculator, Percent, CreditCard, LucideIcon } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
-import { batchScanInvoices } from "@/services/api";
+import { batchScanInvoices, addHistoryRecord } from "@/services/api";
+import { DOCUMENT_TYPE_CHOICES } from "@/shared/constants";
+import type { DocumentType } from "@/shared/types";
 import styles from "./Home.module.css";
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  Receipt,
+  Calculator,
+  Percent,
+  CreditCard,
+};
 
 function getFileName(path: string): string {
   return path.split(/[/\\]/).pop() ?? path;
 }
 
 export function Home() {
-  const { setScreen, setBatchInvoices } = useApp();
+  const { setScreen, setBatchInvoices, setBatchFailures, defaultDocumentType, defaultFolderId } = useApp();
   const { error: showError, success: showSuccess } = useToast();
+  const [chosenDocumentType, setChosenDocumentType] = useState<DocumentType | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const effectiveDocumentType: DocumentType = chosenDocumentType ?? defaultDocumentType ?? "generic";
 
   const handleSelectPdfs = useCallback(async () => {
     const selected = await open({
@@ -44,12 +57,32 @@ export function Home() {
     if (selectedFiles.length === 0) return;
     setIsProcessing(true);
     try {
-      const result = await batchScanInvoices(selectedFiles);
-      setBatchInvoices(result);
+      // Pass document type to OCR so it can select the appropriate model
+      const result = await batchScanInvoices(selectedFiles, effectiveDocumentType);
+      for (const inv of result.successes) {
+        const docType = inv.fields.document_type?.value ?? effectiveDocumentType;
+        const extractedData = Object.fromEntries(
+          Object.entries(inv.fields).map(([k, v]) => [k, v.value])
+        );
+        const fileName = inv.source_file ?? "scanned.pdf";
+        try {
+          await addHistoryRecord({
+            document_type: docType,
+            file_path_or_name: fileName,
+            extracted_data: extractedData,
+            status: "pending",
+            folder_id: defaultFolderId ?? undefined,
+          });
+        } catch {
+          // non-fatal: history add failed for this one
+        }
+      }
+      setBatchInvoices(result.successes);
+      setBatchFailures(result.failures);
       setScreen("batchReview");
-      if (result.length < selectedFiles.length) {
+      if (result.failures.length > 0) {
         showSuccess(
-          `${result.length} of ${selectedFiles.length} invoices scanned. Some files could not be processed.`
+          `${result.successes.length} of ${selectedFiles.length} invoices scanned. ${result.failures.length} file(s) failed.`
         );
       }
     } catch (e) {
@@ -57,10 +90,52 @@ export function Home() {
     } finally {
       setIsProcessing(false);
     }
-  }, [selectedFiles, setBatchInvoices, setScreen, showError, showSuccess]);
+  }, [selectedFiles, setBatchInvoices, setScreen, showError, showSuccess, effectiveDocumentType, defaultFolderId]);
+
+  if (chosenDocumentType == null) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.hero}>
+          <h1 className={styles.title}>Invoice Scanner</h1>
+          <p className={styles.subtitle}>
+            Choose the type of document you want to scan
+          </p>
+        </div>
+        <div className={styles.typeList} role="list">
+          {DOCUMENT_TYPE_CHOICES.map(({ id, label, icon }) => {
+            const IconComponent = ICON_MAP[icon] || Receipt;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={styles.typeItem}
+                onClick={() => setChosenDocumentType(id)}
+                role="listitem"
+              >
+                <span className={styles.typeIcon} aria-hidden>
+                  <IconComponent size={24} strokeWidth={2} />
+                </span>
+                <span className={styles.typeLabel}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.page}>
+      <div className={styles.backRow}>
+        <button
+          type="button"
+          className={styles.backButton}
+          onClick={() => setChosenDocumentType(null)}
+          aria-label="Back to document type"
+        >
+          ← Back
+        </button>
+      </div>
       <div className={styles.hero}>
         <h1 className={styles.title}>Invoice Scanner</h1>
         <p className={styles.subtitle}>

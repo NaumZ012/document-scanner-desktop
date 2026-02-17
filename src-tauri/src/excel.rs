@@ -1,5 +1,5 @@
 use calamine::{open_workbook_auto, DataType, Reader};
-use edit_xlsx::Write;
+use edit_xlsx::{FormatAlignType, WorkSheetRow, Write};
 use regex::Regex;
 use std::io::{Read, Write as IoWrite};
 use std::path::Path;
@@ -310,12 +310,15 @@ pub fn append_row_to_excel(
         .map_err(|e| format!("Sheet not found: {}", e))?;
 
     let new_row = worksheet.max_row() + 1;
-
+    let format = data_cell_format();
     for (col_letter, value) in column_values {
         let cell_ref = format!("{}{}", col_letter.to_uppercase(), new_row);
         let safe_value = sanitize_cell(&value);
-        worksheet.write_string(&cell_ref, safe_value).map_err(|e| e.to_string())?;
+        worksheet
+            .write_string_with_format(&cell_ref, safe_value, &format)
+            .map_err(|e| e.to_string())?;
     }
+    let _ = worksheet.set_row_height_with_format(new_row, 96.0, &format);
 
     workbook.save_as(path).map_err(|e| {
         let msg = e.to_string();
@@ -331,8 +334,17 @@ pub fn append_row_to_excel(
     Ok(())
 }
 
+/// Data row format: smaller font (9pt), normal weight, top+left align so multi-line text is readable and not cut off.
+/// edit_xlsx does not expose wrap_text; we rely on tall row height and vertical Top alignment.
+fn data_cell_format() -> edit_xlsx::Format {
+    edit_xlsx::Format::default()
+        .set_size(9)
+        .set_align(FormatAlignType::Top)
+        .set_align(FormatAlignType::Left)
+}
+
 /// Append one row at a specific row number (for fast append when next_free_row is cached).
-/// column_values: (column_letter, value) e.g. ("A", "123"), ("B", "Invoice")
+/// Uses larger row height so multi-line cells (e.g. Опис) are fully visible, and smaller font.
 pub fn append_row_to_excel_at_row(
     path: &str,
     sheet_name: &str,
@@ -357,11 +369,18 @@ pub fn append_row_to_excel_at_row(
         .get_worksheet_mut_by_name(sheet_name)
         .map_err(|e| format!("Sheet not found: {}", e))?;
 
-    for (col_letter, value) in column_values {
+    let format = data_cell_format();
+    for (col_letter, value) in &column_values {
         let cell_ref = format!("{}{}", col_letter.to_uppercase(), row_number);
-        let safe_value = sanitize_cell(&value);
-        worksheet.write_string(&cell_ref, safe_value).map_err(|e| e.to_string())?;
+        let safe_value = sanitize_cell(value);
+        worksheet
+            .write_string_with_format(&cell_ref, safe_value, &format)
+            .map_err(|e| e.to_string())?;
     }
+
+    // Tall row so multi-line text (e.g. Опис) is fully visible; 96pt fits ~6–8 lines at 9pt.
+    let row_height = 96.0;
+    let _ = worksheet.set_row_height_with_format(row_number, row_height, &format);
 
     workbook.save_as(path).map_err(|e| {
         let msg = e.to_string();
@@ -376,8 +395,9 @@ pub fn append_row_to_excel_at_row(
     Ok(())
 }
 
-/// Column keys for batch export (order matches header row).
+/// Column keys for batch export (order matches header row). First column = document type (Тип на документ).
 const EXPORT_FIELDS: &[&str] = &[
+    "document_type",
     "invoice_number",
     "date",
     "seller_name",
@@ -505,8 +525,9 @@ fn calculate_export_column_widths(invoices: &[InvoiceData]) -> Vec<f64> {
     max_widths
 }
 
-/// Headers for batch export Excel (Macedonian).
+/// Headers for batch export Excel (Macedonian). First column = type of document.
 const EXPORT_HEADERS: &[&str] = &[
+    "Тип на документ",
     "Број на документ",
     "Дата на документ",
     "Продавач",

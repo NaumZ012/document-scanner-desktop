@@ -95,6 +95,10 @@
   background: linear-gradient(135deg, #38bdf8, #2563eb);
 }
 
+.design_purple {
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
+}
+
 .design_oled {
   background: linear-gradient(135deg, #00ff80, #00ff80);
   box-shadow: 0 0 0 2px #000;

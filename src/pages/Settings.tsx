@@ -39,12 +39,14 @@ const LIGHT_DESIGNS: { id: DesignVariant; label: string }[] = [
   { id: "default", label: "Default" },
   { id: "warm", label: "Warm" },
   { id: "cool", label: "Cool" },
+  { id: "purple", label: "Purple" },
 ];
 
 const DARK_DESIGNS: { id: DesignVariant; label: string }[] = [
   { id: "default", label: "Default" },
   { id: "warm", label: "Warm" },
   { id: "cool", label: "Cool" },
+  { id: "purple", label: "Purple" },
   { id: "oled", label: "OLED" },
 ];
 

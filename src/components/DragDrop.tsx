@@ -45,7 +45,9 @@ export function DragDrop() {
     async (filePath: string, fileName: string) => {
       setLoading(true);
       try {
-        const invoiceData = await runOcrInvoice(filePath);
+        // Pass document type to OCR so it can select the appropriate model
+        const docTypeForOcr = defaultDocumentType ?? "faktura";
+        const invoiceData = await runOcrInvoice(filePath, docTypeForOcr);
         const fields = invoiceDataToFields(invoiceData);
         const docType = invoiceData.fields.document_type?.value ?? defaultDocumentType ?? "generic";
         const extractedData = Object.fromEntries(

@@ -15,6 +15,7 @@ import type { ExtractedField } from "@/shared/types";
 import { FIELD_LABELS_MK, GROUP_LABELS_MK } from "@/shared/constants";
 import type { FieldKey } from "@/shared/constants";
 import { sortFieldsByData, groupFieldsForDisplay, buildProfileDisplayFields } from "@/utils/fieldUtils";
+import { fixDisplayValue } from "@/utils/displayFix";
 import { analyzeSchema } from "@/services/schemaService";
 import { appendRowViaBackend } from "@/services/excelService";
 import { recordMapping } from "@/services/learningService";
@@ -45,7 +46,11 @@ export function Review() {
   const fromHistory = review?.fromHistory === true;
 
   useEffect(() => {
-    if (review) setFields(review.fields);
+    if (review) {
+      setFields(
+        review.fields.map((f) => ({ ...f, value: fixDisplayValue(f.value) }))
+      );
+    }
   }, [review]);
 
   useEffect(() => {

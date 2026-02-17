@@ -8,13 +8,23 @@ export const DOCUMENT_TYPES: DocumentType[] = [
   "generic",
 ];
 
+/** Options shown when user chooses document type before scanning (label + id + icon name). */
+export const DOCUMENT_TYPE_CHOICES: { id: DocumentType; label: string; icon: string }[] = [
+  { id: "faktura", label: "Invoices", icon: "Receipt" },
+  { id: "smetka", label: "Даночен Биланс", icon: "Calculator" },
+  { id: "generic", label: "ДДВ", icon: "Percent" },
+  { id: "plata", label: "Плати", icon: "CreditCard" },
+];
+
 export const FIELD_KEYS = [
   "document_type",
   "invoice_number",
+  "document_number",
   "date",
   "seller_name",
   "seller_address",
   "seller_tax_id",
+  "seller_edb",
   "buyer_name",
   "buyer_address",
   "buyer_tax_id",
@@ -40,8 +50,8 @@ export const REQUIRED_FIELD_KEYS: FieldKey[] = [
 
 /** Field groups for logical ordering and sections. */
 export const FIELD_GROUPS = {
-  document: ["document_type", "invoice_number", "date", "reference"] as const,
-  seller: ["seller_name", "seller_address", "seller_tax_id"] as const,
+  document: ["document_type", "invoice_number", "document_number", "date", "reference"] as const,
+  seller: ["seller_name", "seller_address", "seller_tax_id", "seller_edb"] as const,
   buyer: ["buyer_name", "buyer_address", "buyer_tax_id"] as const,
   amounts: ["description", "net_amount", "tax_amount", "total_amount", "currency"] as const,
   other: ["due_date", "payment_method"] as const,
@@ -82,10 +92,12 @@ export const FIELD_TEXTAREA: FieldKey[] = [
 export const FIELD_LABELS: Record<FieldKey, string> = {
   document_type: "Document type",
   invoice_number: "Invoice number",
+  document_number: "Document number (ID)",
   date: "Date",
   seller_name: "Seller name",
   seller_address: "Seller address",
   seller_tax_id: "Seller tax ID",
+  seller_edb: "Seller EDB (Tax ID)",
   buyer_name: "Buyer name",
   buyer_address: "Buyer address",
   buyer_tax_id: "Buyer tax ID",
@@ -103,10 +115,12 @@ export const FIELD_LABELS: Record<FieldKey, string> = {
 export const FIELD_LABELS_MK: Record<FieldKey, string> = {
   document_type: "Тип на документ",
   invoice_number: "Број на документ",
+  document_number: "Број на фактура / ID",
   date: "Дата на документ",
   seller_name: "Продавач",
   seller_address: "Адреса на продавач",
   seller_tax_id: "Даночен број",
+  seller_edb: "ЕДБ (даночен број)",
   buyer_name: "Купувач",
   buyer_address: "Адреса на купувач",
   buyer_tax_id: "Даночен број купувач",
@@ -154,6 +168,14 @@ export const KEYWORDS_MAP: Partial<Record<FieldKey, string[]>> = {
     "номер фактуры",
     "invoice #",
   ],
+  document_number: [
+    "invoice id",
+    "број на фактура",
+    "број на документ",
+    "document number",
+    "invoice no",
+    "broj fakture",
+  ],
   date: [
     "датум на фактура",
     "дата на документ",
@@ -193,6 +215,16 @@ export const KEYWORDS_MAP: Partial<Record<FieldKey, string[]>> = {
     "tax id",
     "vat id",
     "idno",
+  ],
+  seller_edb: [
+    "едб",
+    "ембс",
+    "даночен број",
+    "vendor tax",
+    "vendor tax id",
+    "pib",
+    "tax id",
+    "vat id",
   ],
   buyer_name: [
     "купувач",
@@ -316,6 +348,9 @@ export const HEADER_KEYWORDS: Partial<Record<FieldKey, string[]>> = {
     "invoice",
     "тип документ",
     "вид на документ",
+    "даночен биланс",
+    "type of document",
+    "typeofdocument",
   ],
   invoice_number: [
     "invoice number",
@@ -336,6 +371,13 @@ export const HEADER_KEYWORDS: Partial<Record<FieldKey, string[]>> = {
     "фактура бр",
     "документ бр",
   ],
+  document_number: [
+    "invoice id",
+    "document number",
+    "број на документ",
+    "број на фактура",
+    "invoice no",
+  ],
   date: [
     "date",
     "document date",
@@ -346,6 +388,8 @@ export const HEADER_KEYWORDS: Partial<Record<FieldKey, string[]>> = {
     "датум",
     "rechnungsdatum",
     "invoice date",
+    "period",
+    "период",
   ],
   seller_name: [
     "seller name",
@@ -372,6 +416,14 @@ export const HEADER_KEYWORDS: Partial<Record<FieldKey, string[]>> = {
     "мат. број",
     "pib",
     "vat number",
+    "tax id",
+    "company id",
+  ],
+  seller_edb: [
+    "едб",
+    "vendor tax id",
+    "даночен број",
+    "pib",
     "tax id",
     "company id",
   ],
@@ -408,6 +460,8 @@ export const HEADER_KEYWORDS: Partial<Record<FieldKey, string[]>> = {
     "items",
     "услуги",
     "services",
+    "предмет",
+    "subject",
   ],
   net_amount: [
     "net amount",
@@ -431,6 +485,19 @@ export const HEADER_KEYWORDS: Partial<Record<FieldKey, string[]>> = {
     "total sum",
     "вкупно",
     "износ за плаќање",
+    "јануари",
+    "фебруари",
+    "март",
+    "април",
+    "мај",
+    "јуни",
+    "јули",
+    "август",
+    "септември",
+    "октомври",
+    "ноември",
+    "декември",
+    "бруто плата",
   ],
   tax_amount: [
     "tax amount",

@@ -18,7 +18,9 @@ const CURRENCY_MAP: Record<string, string> = {
   mkd: "MKD",
   rsd: "RSD",
   eur: "EUR",
+  euro: "EUR",
   usd: "USD",
+  dollar: "USD",
 };
 
 /** Format a YYYY-MM-DD date for display according to user preference. */
@@ -56,14 +58,19 @@ export function formatFieldValue(
   }
 
   if (FIELD_INPUT_TYPE[key] === "amount") {
-    const cleaned = v.replace(/\s/g, "").replace(/\u00a0/g, "").replace(/,/g, ".");
-    return cleaned;
+    // Format amount for display with comma as thousands separator
+    return formatAmountForDisplay(v);
   }
 
   if (key === "currency") {
     const norm = v.replace(/[€$]/g, "").trim().toLowerCase();
     return CURRENCY_MAP[norm] ?? v.toUpperCase();
   }
+
+  // document_type: Keep as-is from Azure OCR, no translation or normalization
+  // if (key === "document_type") {
+  //   return v; // Already handled by returning v at the end
+  // }
 
   return v;
 }
@@ -107,10 +114,99 @@ const SCHEMA_HASH_KEY = "_schemaHash";
 /** Synthetic key prefix for Excel columns that have no semantic field mapping (e.g. col_A). */
 export const COLUMN_KEY_PREFIX = "col_";
 
+const DOCUMENT_TYPE_LABEL = "Тип на документ";
+
+/**
+ * Format a numeric value for display: comma as thousands separator, comma as decimal separator (European/Macedonian format).
+ * Handles both "151.565,00" (European format) and "151565.00" (standard format) as input.
+ * Returns formatted string like "151,565,00" (comma for both thousands and decimals)
+ * If the decimal part is zero (.00), displays as whole number without decimals (e.g., "151,565")
+ */
+export function formatAmountForDisplay(value: string): string {
+  if (!value || !value.trim()) return value;
+  const cleaned = value.replace(/\s/g, "").replace(/\u00a0/g, "");
+  
+  // Check if it's European format (dot as thousands, comma as decimal): "151.565,00"
+  const europeanFormat = /^\d{1,3}(\.\d{3})*(,\d{1,2})?$/.test(cleaned);
+  
+  // Check if it's already formatted with comma as thousands and period as decimal: "514,327.00"
+  const commaThousandsPeriodDecimal = /^\d{1,3}(,\d{3})*(\.\d{1,2})?$/.test(cleaned);
+  
+  let num: number;
+  if (europeanFormat) {
+    // European format: "151.565,00" -> parse as "151565.00"
+    const normalized = cleaned.replace(/\./g, "").replace(",", ".");
+    num = parseFloat(normalized);
+  } else if (commaThousandsPeriodDecimal) {
+    // Already formatted: "514,327.00" -> parse as "514327.00" (remove comma thousands separator)
+    const normalized = cleaned.replace(/,/g, "");
+    num = parseFloat(normalized);
+  } else {
+    // Standard format: "151565.00" or "151565,00" or "151565"
+    num = parseFloat(cleaned.replace(/,/g, "."));
+  }
+  
+  if (Number.isNaN(num)) return value;
+  
+  // Check if it's a whole number (handle floating point precision issues)
+  // Use a small epsilon to account for floating point errors (e.g., 514327.0000001 should be treated as whole)
+  const epsilon = 0.0001;
+  const remainder = Math.abs(num % 1);
+  const isWholeNumber = remainder < epsilon || remainder > (1 - epsilon);
+  
+  if (isWholeNumber) {
+    // Format as whole number without decimals (round to nearest integer to handle precision issues)
+    // Example: 514327.00 -> "514,327" (comma as thousands separator, no decimal part)
+    const wholeNum = Math.round(num);
+    const intPart = Math.abs(wholeNum).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return wholeNum < 0 ? `-${intPart}` : intPart;
+  } else {
+    // Format with comma as thousands separator and comma as decimal separator (European format)
+    // Example: 514327.33 -> "514,327,33"
+    const parts = num.toFixed(2).split(".");
+    const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    const decPart = parts[1];
+    // Remove trailing zeros from decimal part
+    const trimmedDec = decPart.replace(/0+$/, "");
+    return trimmedDec ? `${intPart},${trimmedDec}` : intPart;
+  }
+}
+
+/**
+ * Format a numeric value for Excel: comma as thousands separator, period as decimal (Excel standard).
+ * Handles both "50343.12" and "50343,12" as input.
+ * Note: Excel uses period for decimals, so we format differently than display.
+ */
+export function formatNumberForExcel(value: string): string {
+  if (!value || !value.trim()) return value;
+  const cleaned = value.replace(/\s/g, "").replace(/\u00a0/g, "");
+  
+  // Check if it's European format (dot as thousands, comma as decimal)
+  const europeanFormat = /^\d{1,3}(\.\d{3})*(,\d{1,2})?$/.test(cleaned);
+  
+  let num: number;
+  if (europeanFormat) {
+    // European format: "151.565,00" -> parse as "151565.00"
+    const normalized = cleaned.replace(/\./g, "").replace(",", ".");
+    num = parseFloat(normalized);
+  } else {
+    // Standard format: "151565.00" or "151565,00"
+    num = parseFloat(cleaned.replace(/,/g, "."));
+  }
+  
+  if (Number.isNaN(num)) return value;
+  
+  // Format with comma as thousands separator and period as decimal separator (Excel format)
+  const parts = num.toFixed(2).split(".");
+  const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const decPart = parts[1];
+  return decPart ? `${intPart}.${decPart}` : intPart;
+}
+
 /**
  * Build display fields from the selected Excel profile: one field per column (mapped or unmapped),
  * in Excel column order (A, B, C...), with the Excel header as label.
- * Mapped columns use semantic field_key; unmapped columns use synthetic key "col_A", "col_B", etc.
+ * Document type (Тип на документ) is always shown first for preview/export.
  */
 export function buildProfileDisplayFields(
   headers: string[],
@@ -135,5 +231,19 @@ export function buildProfileDisplayFields(
       label,
     });
   }
-  return result;
+  // Ensure document type is first in preview (Тип на документ)
+  const docTypeField = result.find((f) => f.key === "document_type");
+  const rest = result.filter((f) => f.key !== "document_type");
+  if (docTypeField) {
+    return [{ ...docTypeField, label: DOCUMENT_TYPE_LABEL }, ...rest];
+  }
+  return [
+    {
+      key: "document_type",
+      value: keyToValue.get("document_type") ?? "Фактура",
+      confidence: keyToConfidence.get("document_type"),
+      label: DOCUMENT_TYPE_LABEL,
+    },
+    ...result,
+  ];
 }

@@ -118,19 +118,24 @@ pub fn run_ocr(file_path: &str) -> Result<OcrResult, String> {
     Err("OCR timed out. Try again.".to_string())
 }
 
-/// Azure prebuilt-invoice field name -> our internal field key.
+/// MIS-01 built fields: CustomerName, InvoiceId, InvoiceTotal, SubTotal, DDV, VendorName, InvoiceDate, Items (→ description).
+/// Use .get("KeyName") only; if a field is missing, extraction returns default empty/0.0.
 const AZURE_TO_FIELD: &[(&str, &str)] = &[
-    ("InvoiceId", "invoice_number"),
-    ("InvoiceDate", "date"),
-    ("DueDate", "due_date"),
+    ("TypeOfDocument", "document_type"),
+    ("Currency", "currency"),
+    ("CurrencyCode", "currency"),
     ("VendorName", "seller_name"),
-    ("VendorAddress", "seller_address"),
-    ("VendorTaxId", "seller_tax_id"),
     ("CustomerName", "buyer_name"),
-    ("CustomerAddress", "buyer_address"),
-    ("CustomerTaxId", "buyer_tax_id"),
+    ("InvoiceId", "document_number"),
     ("InvoiceTotal", "total_amount"),
     ("SubTotal", "net_amount"),
+    ("DDV", "tax_amount"),
+    ("InvoiceDate", "date"),
+    ("DueDate", "due_date"),
+    ("VendorTaxId", "seller_edb"),
+    ("VendorAddress", "seller_address"),
+    ("CustomerAddress", "buyer_address"),
+    ("CustomerTaxId", "buyer_tax_id"),
     ("TotalTax", "tax_amount"),
     ("CurrencyCode", "currency"),
     ("PaymentTerm", "payment_method"),
@@ -162,7 +167,9 @@ fn extract_azure_field_value(obj: &serde_json::Value) -> String {
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
-        Some("date") => get_trimmed(obj, "valueDate"),
+        Some("date") => get_trimmed(obj, "valueDate")
+            .or_else(|| get_trimmed(obj, "content"))
+            .or_else(|| get_trimmed(obj, "valueString")),
         Some("time") => get_trimmed(obj, "valueTime"),
         Some("number") | Some("integer") | Some("float") => obj
             .get("valueNumber")
@@ -184,12 +191,13 @@ fn extract_azure_field_value(obj: &serde_json::Value) -> String {
     // Generic fallbacks if field.type is missing or didn't yield a value.
     let generic = primary
         .or_else(|| get_trimmed(obj, "valueString"))
+        .or_else(|| get_trimmed(obj, "valueDate"))
+        .or_else(|| get_trimmed(obj, "content"))
         .or_else(|| {
             obj.get("valueNumber")
                 .and_then(|v| v.as_f64())
                 .map(|n| n.to_string())
         })
-        .or_else(|| get_trimmed(obj, "valueDate"))
         .or_else(|| get_trimmed(obj, "valueTime"));
 
     // Last resort: raw OCR content.
@@ -243,6 +251,23 @@ fn looks_like_address_line(line: &str) -> bool {
         .any(|kw| lower.starts_with(kw) || lower.contains(&format!(" {} ", kw)))
 }
 
+/// Insert spaces in run-together vendor/buyer names (e.g. "DSVROADDOOELSKOPJE" → "DSV ROAD DOOEL SKOPJE").
+fn fix_all_caps_run_together(s: &str) -> String {
+    let t = s.trim();
+    if t.is_empty() || t.contains(' ') {
+        return s.to_string();
+    }
+    if t.len() < 6 {
+        return s.to_string();
+    }
+    let mut out = t.to_string();
+    for keyword in &["DOOEL", "ДООЕЛ", "SKOPJE", "СКОПЈЕ", "ROAD", "DOO"] {
+        let with_space = format!(" {}", keyword);
+        out = out.replace(keyword, &with_space);
+    }
+    out.trim_start().to_string()
+}
+
 /// Join multi-line company names by space and collapse internal whitespace.
 fn join_multiline_name(raw: &str) -> String {
     let joined = raw
@@ -290,11 +315,6 @@ fn is_legal_form_token(token: &str) -> bool {
     )
 }
 
-fn company_has_legal_form(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    lower.split_whitespace().any(|w| is_legal_form_token(w))
-}
-
 /// Smart multi-line company name extraction:
 /// - Base: first non-empty line
 /// - For next lines:
@@ -340,41 +360,6 @@ fn smart_multiline_company_name(raw: &str) -> String {
     }
 
     company_name_only(&base)
-}
-
-/// Scan full prebuilt-read text lines to find the best company line containing a legal form.
-fn find_company_line_in_read(read_lines: &[String]) -> Option<String> {
-    let mut best: Option<(String, f64)> = None;
-
-    for (idx, line) in read_lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if !company_has_legal_form(trimmed) {
-            continue;
-        }
-        // Skip lines that are mostly numbers (likely tax IDs, IBANs, etc.).
-        let digits = trimmed.chars().filter(|c| c.is_ascii_digit()).count();
-        if digits as f32 > trimmed.len() as f32 * 0.4 {
-            continue;
-        }
-        let mut score = 1.0;
-        // Earlier lines score higher.
-        score -= (idx as f64) * 0.01;
-        let len_no_spaces = trimmed.chars().filter(|c| !c.is_whitespace()).count();
-        if len_no_spaces > 10 {
-            score += 0.1;
-        }
-        if let Some((_, best_score)) = &best {
-            if score <= *best_score {
-                continue;
-            }
-        }
-        best = Some((trimmed.to_string(), score));
-    }
-
-    best.map(|(line, _)| line)
 }
 
 /// Clean and normalize a raw company name: join multi-line values and trim/collapse whitespace.
@@ -516,7 +501,6 @@ fn best_vendor_name(fields_obj: &serde_json::Map<String, serde_json::Value>) -> 
                         let confidence = obj.get("confidence").and_then(|c| c.as_f64());
                         let score = score_vendor_candidate(&name, confidence);
                         if score > best_score {
-                            best_score = score;
                             best_name = name;
                             best_conf = confidence;
                         }
@@ -533,54 +517,6 @@ fn best_vendor_name(fields_obj: &serde_json::Map<String, serde_json::Value>) -> 
         validate_company_name(&best_name, "BestVendor");
         (best_name, best_conf)
     }
-}
-
-/// Try to extract the vendor company line from Azure paragraph data (analyzeResult.paragraphs).
-/// Strategy:
-/// - Prefer paragraphs with role containing "vendor"/"seller"/"supplier".
-/// - Otherwise, look at the first few paragraphs near the top of the document.
-/// - From the chosen paragraph, take the first non-empty line that does not look like an address.
-fn extract_vendor_from_paragraphs(analyze_result: &serde_json::Value) -> Option<String> {
-    let paragraphs = analyze_result.get("paragraphs").and_then(|p| p.as_array())?;
-
-    fn first_company_like_line(p: &serde_json::Value) -> Option<String> {
-        let content = p.get("content").and_then(|c| c.as_str())?;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            // Skip lines that look like pure addresses (e.g. start with number or postal code).
-            if looks_like_address_suffix(trimmed) {
-                continue;
-            }
-            return Some(trimmed.to_string());
-        }
-        None
-    }
-
-    // Pass 1: role-based search.
-    for paragraph in paragraphs {
-        let role = paragraph
-            .get("role")
-            .and_then(|r| r.as_str())
-            .unwrap_or("")
-            .to_lowercase();
-        if role.contains("vendor") || role.contains("seller") || role.contains("supplier") {
-            if let Some(line) = first_company_like_line(paragraph) {
-                return Some(line);
-            }
-        }
-    }
-
-    // Pass 2: first few paragraphs near top of document.
-    for paragraph in paragraphs.iter().take(5) {
-        if let Some(line) = first_company_like_line(paragraph) {
-            return Some(line);
-        }
-    }
-
-    None
 }
 
 /// Best customer/buyer: whole company name only from API. No address lines used.
@@ -629,24 +565,6 @@ fn best_customer_name(fields_obj: &serde_json::Map<String, serde_json::Value>) -
     (String::new(), None)
 }
 
-/// Clean up buyer name using simple sanity rules:
-/// - Empty -> None
-/// - Same as seller -> None
-/// - Looks like address line -> None
-fn sanitize_buyer_name(buyer: &str, seller: &str) -> Option<String> {
-    let b = buyer.trim();
-    if b.is_empty() {
-        return None;
-    }
-    if b.eq_ignore_ascii_case(seller.trim()) {
-        return None;
-    }
-    if looks_like_address_line(b) {
-        return None;
-    }
-    Some(b.to_string())
-}
-
 fn extract_field_value_and_confidence(obj: &serde_json::Value) -> (String, Option<f64>) {
     let confidence = obj.get("confidence").and_then(|c| c.as_f64());
     let value = extract_azure_field_value(obj);
@@ -664,95 +582,67 @@ fn item_field_string(value_obj: &serde_json::Map<String, serde_json::Value>, key
         .to_string()
 }
 
-/// Get the list of item "title" descriptions (bold/first line only) from Items for matching in read output.
-fn get_invoice_item_titles(fields_obj: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
-    let value_array = match fields_obj
-        .get("Items")
-        .and_then(|v| v.get("valueArray").and_then(|a| a.as_array()))
-    {
-        Some(arr) => arr,
-        None => return vec![],
+/// Get numeric/currency value from a line item subfield (Quantity, Price, etc.) as string.
+fn item_field_number(value_obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> String {
+    let sub = match value_obj.get(key) {
+        Some(v) => v,
+        None => return String::new(),
     };
-    let mut titles = Vec::with_capacity(value_array.len());
-    for item in value_array {
-        let value_obj = match item.get("valueObject").and_then(|o| o.as_object()) {
-            Some(o) => o,
-            None => continue,
-        };
-        let desc = item_field_string(value_obj, "Description");
-        if !desc.is_empty() {
-            titles.push(desc);
-        }
+    // valueNumber / valueInteger
+    if let Some(n) = sub.get("valueNumber").and_then(|v| v.as_f64()) {
+        return n.to_string();
     }
-    titles
+    if let Some(n) = sub.get("valueInteger").and_then(|v| v.as_i64()) {
+        return n.to_string();
+    }
+    // valueCurrency.amount
+    if let Some(amount) = sub
+        .get("valueCurrency")
+        .and_then(|c| c.get("amount"))
+        .and_then(|a| a.as_f64().or_else(|| a.as_str().and_then(|s| s.parse::<f64>().ok())))
+    {
+        return amount.to_string();
+    }
+    // content / valueString as fallback
+    sub.get("content")
+        .or_else(|| sub.get("valueString"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default()
 }
 
-/// Normalize for matching: lowercase, collapse whitespace.
-fn normalize_line(s: &str) -> String {
-    s.trim()
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Whether read line matches an item title (one contains the other after normalizing).
-fn line_matches_title(read_line: &str, title: &str) -> bool {
-    let a = normalize_line(read_line);
-    let b = normalize_line(title);
-    if a.is_empty() || b.is_empty() {
-        return false;
-    }
-    a.contains(b.as_str()) || b.contains(a.as_str())
-}
-
-/// Use prebuilt-read lines to extend each item description with following lines (e.g. "Pratka: ...", "KAMION: ...").
-fn enrich_descriptions_from_read(read_lines: &[String], item_titles: &[String]) -> Vec<String> {
-    if item_titles.is_empty() || read_lines.is_empty() {
-        return item_titles.to_vec();
-    }
-    const MAX_LINES_PER_ITEM: usize = 20;
-    let mut result = Vec::with_capacity(item_titles.len());
-    let mut search_start = 0;
-    for (i, title) in item_titles.iter().enumerate() {
-        let start = match read_lines[search_start..].iter().position(|l| line_matches_title(l, title)) {
-            Some(pos) => search_start + pos,
-            None => {
-                result.push(title.clone());
-                continue;
-            }
-        };
-        let end = if i + 1 < item_titles.len() {
-            match read_lines[start + 1..].iter().position(|l| line_matches_title(l, &item_titles[i + 1])) {
-                Some(pos) => (start + 1 + pos).min(read_lines.len()),
-                None => (start + MAX_LINES_PER_ITEM).min(read_lines.len()),
-            }
-        } else {
-            (start + MAX_LINES_PER_ITEM).min(read_lines.len())
-        };
-        let block: String = read_lines[start..end].join("\n");
-        result.push(block.trim().to_string());
-        search_start = end;
-    }
-    result
-}
-
-/// Extract one combined description from Azure Items: each product's description only, joined one after another (Product desc, then Second desc, ...).
+/// Extract description (опис) from Azure Items field.
+/// Handles both structured (valueArray with Description/Quantity/Price) and simple string formats.
 fn extract_line_items_description(fields_obj: &serde_json::Map<String, serde_json::Value>) -> (String, Option<f64>) {
     let items_field = match fields_obj.get("Items") {
         Some(v) => v,
         None => {
             #[cfg(debug_assertions)]
-            eprintln!("[ocr] No line items (Items) found in invoice");
+            eprintln!("[ocr] No Items field found in invoice");
             return (String::new(), None);
         }
     };
     let confidence = items_field.get("confidence").and_then(|c| c.as_f64());
+    
+    // First, try to get Items as a simple string field (valueString or content).
+    if let Some(content) = items_field.get("valueString").or_else(|| items_field.get("content")) {
+        if let Some(s) = content.as_str() {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                #[cfg(debug_assertions)]
+                eprintln!("[ocr] Items field is a simple string: {} chars", trimmed.len());
+                return (trimmed.to_string(), confidence);
+            }
+        }
+    }
+    
+    // Otherwise, try structured format: valueArray with Description/Quantity/Price per item.
     let value_array = match items_field.get("valueArray").and_then(|a| a.as_array()) {
         Some(arr) => arr,
         None => {
             #[cfg(debug_assertions)]
-            eprintln!("[ocr] Items field has no valueArray");
+            eprintln!("[ocr] Items field has no valueArray and no string content");
             return (String::new(), confidence);
         }
     };
@@ -761,42 +651,89 @@ fn extract_line_items_description(fields_obj: &serde_json::Map<String, serde_jso
         eprintln!("[ocr] Items valueArray is empty");
         return (String::new(), confidence);
     }
-    let mut descriptions: Vec<String> = Vec::with_capacity(value_array.len());
+    let mut lines: Vec<String> = Vec::with_capacity(value_array.len());
     for item in value_array {
         let value_obj = match item.get("valueObject").and_then(|o| o.as_object()) {
             Some(o) => o,
             None => continue,
         };
         let desc = item_field_string(value_obj, "Description");
-        if !desc.is_empty() {
-            descriptions.push(desc);
+        let qty = item_field_number(value_obj, "Quantity");
+        let price = item_field_number(value_obj, "Price");
+        // Build one line per item: "Description | Quantity | Price" (omit empty parts).
+        let parts: Vec<&str> = [desc.as_str(), qty.as_str(), price.as_str()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        if parts.is_empty() {
+            continue;
         }
+        lines.push(parts.join(" | "));
     }
     #[cfg(debug_assertions)]
     {
-        if descriptions.is_empty() {
-            eprintln!("[ocr] Warning: Line items have no descriptions");
+        if lines.is_empty() {
+            eprintln!("[ocr] Warning: Line items have no Description/Quantity/Price");
         } else {
-            eprintln!("[ocr] Found {} line item(s)", descriptions.len());
+            eprintln!("[ocr] Found {} line item(s) in structured format", lines.len());
         }
     }
-    // One combined field: first product desc, then second (single newline between items).
-    let combined = descriptions.join("\n");
+    let combined = lines.join("\n");
     (combined, confidence)
 }
 
-pub fn run_ocr_invoice(file_path: &str) -> Result<InvoiceData, String> {
+pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<InvoiceData, String> {
     load_env();
     let key = std::env::var("AZURE_OCR_KEY").map_err(|_| "AZURE_OCR_KEY not set in .env")?;
     let endpoint = std::env::var("AZURE_OCR_ENDPOINT")
         .map_err(|_| "AZURE_OCR_ENDPOINT not set in .env")?;
     let endpoint = endpoint.trim_end_matches('/');
-    // Use Macedonian locale and enable queryFields feature so Azure looks explicitly
-    // for legal names and tax IDs (extends the fields schema without training).
-    let url = format!(
-        "{}/documentintelligence/documentModels/prebuilt-invoice:analyze?api-version=2024-11-30&locale=mk-MK&features=queryFields&queryFields=SellerLegalName,BuyerLegalName,SellerTaxID,BuyerTaxID",
-        endpoint
-    );
+    
+    // Use MIS-01 custom model ONLY for invoices (faktura)
+    // Each other document type uses a separate Azure prebuilt model:
+    // - smetka (Даночен Биланс/Tax Balance Sheet) → prebuilt-layout (structured forms with tables)
+    // - generic (ДДВ/VAT) → prebuilt-read (general text extraction)
+    // - plata (Плати/Payments) → prebuilt-read (general text extraction)
+    let url = match document_type {
+        Some("faktura") => {
+            // Custom trained model MIS-01 (Macedonian invoices); schema is defined by the model.
+            format!(
+                "{}/documentintelligence/documentModels/MIS-01:analyze?api-version=2024-11-30&locale=mk-MK",
+                endpoint
+            )
+        }
+        Some("smetka") => {
+            // Prebuilt layout model for Tax Balance Sheet (Даночен Биланс)
+            // This model extracts structured content including tables, forms, and text
+            format!(
+                "{}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=2024-11-30",
+                endpoint
+            )
+        }
+        Some("generic") => {
+            // Prebuilt read model for VAT documents (ДДВ)
+            // This model extracts text content from any document format
+            format!(
+                "{}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30",
+                endpoint
+            )
+        }
+        Some("plata") => {
+            // Prebuilt read model for Payment/Salary documents (Плати)
+            // This model extracts text content from any document format
+            format!(
+                "{}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30",
+                endpoint
+            )
+        }
+        _ => {
+            // Default fallback: use prebuilt-read for unknown document types
+            format!(
+                "{}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30",
+                endpoint
+            )
+        }
+    };
 
     let bytes = fs::read(Path::new(file_path)).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -862,17 +799,128 @@ pub fn run_ocr_invoice(file_path: &str) -> Result<InvoiceData, String> {
             .unwrap_or("");
         if status_str == "succeeded" {
             let result = poll_json.get("analyzeResult").ok_or("No analyzeResult")?;
-            let docs = result
+            let doc = result
                 .get("documents")
                 .and_then(|d| d.as_array())
-                .ok_or("No documents in result")?;
-            let doc = docs.first().ok_or("Empty documents array")?;
-            let fields_obj = doc.get("fields").and_then(|f| f.as_object()).ok_or("No fields")?;
+                .and_then(|a| a.first());
+            
+            // Handle different model response formats:
+            // - MIS-01/prebuilt-invoice: returns documents[0].fields (structured fields)
+            // - prebuilt-layout: returns pages, tables, paragraphs (structured layout)
+            // - prebuilt-read: returns content (text content)
+            let fields_obj = doc.and_then(|d| d.get("fields").and_then(|f| f.as_object()));
+            
+            // Handle prebuilt-layout model (smetka - Tax Balance Sheet)
+            if fields_obj.is_none() && document_type == Some("smetka") {
+                // Extract content from prebuilt-layout: combine paragraphs and table content
+                let mut content_parts = Vec::new();
+                
+                // Extract paragraphs
+                if let Some(paragraphs) = result.get("paragraphs").and_then(|p| p.as_array()) {
+                    for para in paragraphs {
+                        if let Some(text) = para.get("content").and_then(|c| c.as_str()) {
+                            content_parts.push(text.to_string());
+                        }
+                    }
+                }
+                
+                // Extract tables
+                if let Some(tables) = result.get("tables").and_then(|t| t.as_array()) {
+                    for table in tables {
+                        if let Some(rows) = table.get("rows").and_then(|r| r.as_array()) {
+                            for row in rows {
+                                if let Some(cells) = row.get("cells").and_then(|c| c.as_array()) {
+                                    let row_text: Vec<String> = cells
+                                        .iter()
+                                        .filter_map(|cell| cell.get("content").and_then(|c| c.as_str()))
+                                        .map(|s| s.to_string())
+                                        .collect();
+                                    if !row_text.is_empty() {
+                                        content_parts.push(row_text.join(" | "));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Fallback to general content if available
+                if content_parts.is_empty() {
+                    if let Some(content) = result.get("content").and_then(|c| c.as_str()) {
+                        content_parts.push(content.to_string());
+                    }
+                }
+                
+                if !content_parts.is_empty() {
+                    let mut fields = HashMap::new();
+                    fields.insert(
+                        "description".to_string(),
+                        InvoiceFieldValue {
+                            value: content_parts.join("\n"),
+                            confidence: None,
+                        },
+                    );
+                    fields.insert(
+                        "document_type".to_string(),
+                        InvoiceFieldValue {
+                            value: "Даночен биланс".to_string(),
+                            confidence: Some(1.0),
+                        },
+                    );
+                    return Ok(InvoiceData {
+                        fields,
+                        source_file: None,
+                        source_file_path: None,
+                    });
+                }
+            }
+            
+            // Handle prebuilt-read model (plata, generic) - text-only extraction
+            if fields_obj.is_none() {
+                // Extract text content from prebuilt-read model response
+                let content = result.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                if !content.trim().is_empty() {
+                    let mut fields = HashMap::new();
+                    fields.insert(
+                        "description".to_string(),
+                        InvoiceFieldValue {
+                            value: content.to_string(),
+                            confidence: None,
+                        },
+                    );
+                    // Set document type based on input parameter
+                    let doc_type_value = match document_type {
+                        Some("plata") => "Плата",
+                        Some("generic") => "ДДВ",
+                        _ => "Документ",
+                    };
+                    fields.insert(
+                        "document_type".to_string(),
+                        InvoiceFieldValue {
+                            value: doc_type_value.to_string(),
+                            confidence: Some(1.0),
+                        },
+                    );
+                    return Ok(InvoiceData {
+                        fields,
+                        source_file: None,
+                        source_file_path: None,
+                    });
+                }
+                // If no content either, return empty result
+                return Ok(InvoiceData {
+                    fields: HashMap::new(),
+                    source_file: None,
+                    source_file_path: None,
+                });
+            }
+            
+            let fields_obj = fields_obj.unwrap();
 
             // Debug logging for key Azure fields (only in debug builds).
             #[cfg(debug_assertions)]
-            {
-                if let Some(vendor_field) = doc.get("fields").and_then(|f| f.get("VendorName")) {
+            if let Some(d) = doc {
+                if let Some(vendor_field) = d.get("fields").and_then(|f| f.get("VendorName")) {
                     let field_type = vendor_field.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
                     let content = vendor_field.get("content").and_then(|c| c.as_str()).unwrap_or("");
                     let value_string = vendor_field.get("valueString").and_then(|v| v.as_str()).unwrap_or("");
@@ -884,14 +932,10 @@ pub fn run_ocr_invoice(file_path: &str) -> Result<InvoiceData, String> {
                 } else {
                     eprintln!("[ocr] DEBUG VendorName field not found in Azure response!");
                 }
-
-                if let Some(customer_field) = doc.get("fields").and_then(|f| f.get("CustomerName")) {
+                if let Some(customer_field) = d.get("fields").and_then(|f| f.get("CustomerName")) {
                     let field_type = customer_field.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
                     let content = customer_field.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                    let value_string = customer_field
-                        .get("valueString")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let value_string = customer_field.get("valueString").and_then(|v| v.as_str()).unwrap_or("");
                     let confidence = customer_field.get("confidence").and_then(|c| c.as_f64());
                     eprintln!(
                         "[ocr] DEBUG CustomerName field: type={}, content={:?}, valueString={:?}, confidence={:?}",
@@ -903,44 +947,57 @@ pub fn run_ocr_invoice(file_path: &str) -> Result<InvoiceData, String> {
             }
 
             let mut fields = HashMap::new();
+            // Extract all mapped fields from Azure, including Currency and TypeOfDocument
             for (azure_key, our_key) in AZURE_TO_FIELD {
                 if *our_key == "seller_name" || *our_key == "buyer_name" {
                     continue;
                 }
                 if let Some(obj) = fields_obj.get(*azure_key) {
                     let (value, confidence) = extract_field_value_and_confidence(obj);
-                    if !value.is_empty() {
+                    // Only insert if value is not empty
+                    if !value.trim().is_empty() {
                         fields.insert(
                             (*our_key).to_string(),
-                            InvoiceFieldValue {
-                                value,
-                                confidence,
-                            },
+                            InvoiceFieldValue { value, confidence },
                         );
                     }
                 }
             }
+            // So existing UI/Excel mappings for "invoice_number" still get the value.
+            if let Some(doc_num) = fields.get("document_number") {
+                if !fields.contains_key("invoice_number") {
+                    fields.insert(
+                        "invoice_number".to_string(),
+                        InvoiceFieldValue {
+                            value: doc_num.value.clone(),
+                            confidence: doc_num.confidence,
+                        },
+                    );
+                }
+            }
             let (vendor_name, vendor_conf) = best_vendor_name(fields_obj);
             if !vendor_name.is_empty() {
+                let name = fix_all_caps_run_together(&vendor_name);
                 fields.insert(
                     "seller_name".to_string(),
                     InvoiceFieldValue {
-                        value: vendor_name,
+                        value: name,
                         confidence: vendor_conf,
                     },
                 );
             }
             let (customer_name, customer_conf) = best_customer_name(fields_obj);
             if !customer_name.is_empty() {
+                let name = fix_all_caps_run_together(&customer_name);
                 fields.insert(
                     "buyer_name".to_string(),
                     InvoiceFieldValue {
-                        value: customer_name,
+                        value: name,
                         confidence: customer_conf,
                     },
                 );
             }
-            // Line items: combine Items.valueArray[*].valueObject (Description, ProductCode, etc.) into "description"
+            // Items → опис (description)
             let (mut description, mut desc_confidence) = extract_line_items_description(fields_obj);
             if description.is_empty() {
                 if let Some(content) = result.get("content").and_then(|c| c.as_str()) {
@@ -958,7 +1015,8 @@ pub fn run_ocr_invoice(file_path: &str) -> Result<InvoiceData, String> {
                     confidence: desc_confidence,
                 },
             );
-            // Currency: valueCurrency.currencyCode or content.currencyCode
+            // Currency: Try to extract from Currency field first (already done above), 
+            // then fallback to valueCurrency.currencyCode from amount fields
             if !fields.contains_key("currency") {
                 for key in &["InvoiceTotal", "SubTotal", "TotalTax"] {
                     if let Some(obj) = fields_obj.get(*key) {
@@ -982,19 +1040,42 @@ pub fn run_ocr_invoice(file_path: &str) -> Result<InvoiceData, String> {
                     }
                 }
             }
-            // Document type: first column shows e.g. "фактура"
+            // TypeOfDocument: Only set default if Azure didn't return TypeOfDocument field
+            // Azure field "TypeOfDocument" should be extracted above, so only set default if missing
             if !fields.contains_key("document_type") {
+                let doc_type_value = match document_type {
+                    Some("plata") => "Плата",
+                    Some("smetka") => "Даночен биланс",
+                    Some("generic") => "ДДВ",
+                    _ => "Фактура", // Default for invoices or unknown
+                };
                 fields.insert(
                     "document_type".to_string(),
                     InvoiceFieldValue {
-                        value: "фактура".to_string(),
+                        value: doc_type_value.to_string(),
                         confidence: Some(1.0),
                     },
                 );
             }
+            // Generic extraction: add any model fields not yet mapped (e.g. Предмет, Даночен биланс for other doc types).
+            let mapped_azure_keys: std::collections::HashSet<&str> = AZURE_TO_FIELD
+                .iter()
+                .map(|(k, _)| *k)
+                .chain(std::iter::once("Items"))
+                .collect();
+            for (model_key, obj) in fields_obj {
+                if mapped_azure_keys.contains(model_key.as_str()) {
+                    continue;
+                }
+                let (value, confidence) = extract_field_value_and_confidence(obj);
+                if !value.is_empty() {
+                    fields.insert(model_key.clone(), InvoiceFieldValue { value, confidence });
+                }
+            }
             return Ok(InvoiceData {
                 fields,
                 source_file: None,
+                source_file_path: None,
             });
         }
         if status_str == "failed" {

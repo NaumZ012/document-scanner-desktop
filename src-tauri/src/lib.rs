@@ -18,6 +18,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            // Load .env from app data dir so production users can place credentials there (Settings → Open app data folder)
+            let env_path = app_data_dir.join(".env");
+            if env_path.exists() {
+                let _ = dotenvy::from_path(&env_path);
+            }
             let db_path = app_data_dir.join("invoice_scanner.db");
             let db = db::Db::new(db_path)?;
             app.manage(AppState {

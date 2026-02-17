@@ -141,7 +141,7 @@
 }
 
 .secondaryButton:hover:not(:disabled) {
-  background: var(--color-surface-hover, #f5f5f5);
+  background: var(--color-surface-hover);
 }
 
 .secondaryButton:disabled {

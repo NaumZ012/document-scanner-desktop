@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { getHistory, getFolders, createFolder, deleteFolder, assignHistoryToFolder } from "@/services/api";
+import { getHistory, getFolders, createFolder, deleteFolder, assignHistoryToFolder, deleteHistoryRecord } from "@/services/api";
 import type { ExtractedField } from "@/shared/types";
 import type { OcrResult } from "@/shared/types";
 import { FIELD_LABELS } from "@/shared/constants";
@@ -183,6 +183,20 @@ export function History() {
     [setReview, setScreen]
   );
 
+  const handleDeleteHistory = useCallback(
+    async (id: number) => {
+      if (!window.confirm("Да го избришам овој запис од историјата?")) return;
+      try {
+        await deleteHistoryRecord(id);
+        success("Записот е избришан.");
+        load();
+      } catch (e) {
+        showError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [load, success, showError]
+  );
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -250,46 +264,61 @@ export function History() {
               </thead>
               <tbody>
                 {paginatedRows.map((row) => {
-                const [id, createdAt, docType, filePathOrName] = row;
-                const name = fileNameFromPath(filePathOrName);
-                return (
-                  <tr key={id}>
-                    <td className={styles.nameCell}>{name}</td>
-                    <td className={styles.typeCell}>{docType}</td>
-                    <td className={styles.dateCell}>{formatDate(createdAt)}</td>
-                    <td className={styles.actionsCell}>
-                      <select
-                        className={styles.moveSelect}
-                        value=""
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          e.target.value = "";
-                          if (!v) return;
-                          const folderId = v === "none" ? null : Number(v);
-                          assignHistoryToFolder(id, folderId).then(() => {
-                            success("Преместено.");
-                            load();
-                          }).catch((err) => showError(err instanceof Error ? err.message : String(err)));
-                        }}
-                        title="Премести во папка"
-                      >
-                        <option value="">Премести…</option>
-                        <option value="none">Некатегоризирани</option>
-                        {folders.map(([fid, fname]) => (
-                          <option key={fid} value={fid}>{fname}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className={styles.reviewBtn}
-                        onClick={() => handleOpenReview(row)}
-                      >
-                        Преглед
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                  const [id, createdAt, docType, filePathOrName] = row;
+                  const name = fileNameFromPath(filePathOrName);
+                  return (
+                    <tr key={id}>
+                      <td className={styles.nameCell}>{name}</td>
+                      <td className={styles.typeCell}>{docType}</td>
+                      <td className={styles.dateCell}>{formatDate(createdAt)}</td>
+                      <td className={styles.actionsCell}>
+                        <select
+                          className={styles.moveSelect}
+                          value=""
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            e.target.value = "";
+                            if (!v) return;
+                            const folderId = v === "none" ? null : Number(v);
+                            assignHistoryToFolder(id, folderId)
+                              .then(() => {
+                                success("Преместено.");
+                                load();
+                              })
+                              .catch((err) =>
+                                showError(err instanceof Error ? err.message : String(err))
+                              );
+                          }}
+                          title="Премести во папка"
+                        >
+                          <option value="">Премести…</option>
+                          <option value="none">Некатегоризирани</option>
+                          {folders.map(([fid, fname]) => (
+                            <option key={fid} value={fid}>
+                              {fname}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className={styles.reviewBtn}
+                          onClick={() => handleOpenReview(row)}
+                        >
+                          Преглед
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.deleteBtn}
+                          onClick={() => handleDeleteHistory(id)}
+                          title="Избриши запис"
+                          aria-label="Избриши запис"
+                        >
+                          🗑
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

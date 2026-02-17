@@ -1,5 +1,5 @@
 import React, { createContext, useState, useCallback, useEffect } from "react";
-import type { OcrResult, InvoiceData } from "@/shared/types";
+import type { OcrResult, InvoiceData, FailedScan } from "@/shared/types";
 import type { ExtractedField } from "@/shared/types";
 import type { DocumentType } from "@/shared/types";
 
@@ -28,7 +28,9 @@ interface AppContextValue {
   selectedProfileId: number | null;
   setSelectedProfileId: (id: number | null) => void;
   batchInvoices: InvoiceData[] | null;
-  setBatchInvoices: (v: InvoiceData[] | null) => void;
+  setBatchInvoices: React.Dispatch<React.SetStateAction<InvoiceData[] | null>>;
+  batchFailures: FailedScan[] | null;
+  setBatchFailures: React.Dispatch<React.SetStateAction<FailedScan[] | null>>;
   theme: "light" | "dark" | "system";
   setTheme: (t: "light" | "dark" | "system") => void;
   design: DesignVariant;
@@ -70,7 +72,7 @@ const CONFIRM_BEFORE_EXPORT_KEY = "invoice-scanner-confirm-before-export";
 const FONT_SIZE_KEY = "invoice-scanner-font-size";
 const COMPACT_MODE_KEY = "invoice-scanner-compact-mode";
 export type ThemePreference = "light" | "dark" | "system";
-export type DesignVariant = "default" | "warm" | "cool" | "oled";
+export type DesignVariant = "default" | "warm" | "cool" | "oled" | "purple";
 
 function loadTheme(): ThemePreference {
   try {
@@ -83,7 +85,7 @@ function loadTheme(): ThemePreference {
 function loadDesign(): DesignVariant {
   try {
     const d = localStorage.getItem(DESIGN_KEY);
-    if (d === "default" || d === "warm" || d === "cool" || d === "oled") return d;
+    if (d === "default" || d === "warm" || d === "cool" || d === "oled" || d === "purple") return d;
   } catch {}
   return "cool";
 }
@@ -195,6 +197,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [review, setReview] = useState<ReviewState | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [batchInvoices, setBatchInvoices] = useState<InvoiceData[] | null>(null);
+  const [batchFailures, setBatchFailures] = useState<FailedScan[] | null>(null);
   const [theme, setThemeState] = useState<ThemePreference>(loadTheme);
 
   const setTheme = useCallback((t: ThemePreference) => {
@@ -334,6 +337,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setSelectedProfileId,
         batchInvoices,
         setBatchInvoices,
+        batchFailures,
+        setBatchFailures,
         theme,
         setTheme,
         design,

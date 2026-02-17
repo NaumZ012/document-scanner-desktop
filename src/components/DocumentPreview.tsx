@@ -13,10 +13,18 @@ function isPdf(path: string): boolean {
   return path.toLowerCase().endsWith(".pdf");
 }
 
+/** Check if file is an image by extension */
+function isImage(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || 
+         lower.endsWith(".png") || lower.endsWith(".gif") || 
+         lower.endsWith(".bmp") || lower.endsWith(".webp");
+}
+
 export function DocumentPreview({ filePath, fileName, className }: DocumentPreviewProps) {
   const [zoomOpen, setZoomOpen] = useState(false);
 
-  const pdfUrl = useMemo(() => {
+  const fileUrl = useMemo(() => {
     if (!filePath) return null;
     try {
       return convertFileSrc(filePath);
@@ -25,10 +33,12 @@ export function DocumentPreview({ filePath, fileName, className }: DocumentPrevi
     }
   }, [filePath]);
 
-  const canShowPdf = isPdf(filePath) && pdfUrl;
+  const canShowPdf = isPdf(filePath) && fileUrl;
+  const canShowImage = isImage(filePath) && fileUrl;
+  const canPreview = canShowPdf || canShowImage;
 
   const handlePreviewClick = () => {
-    if (canShowPdf) setZoomOpen(true);
+    if (canPreview) setZoomOpen(true);
   };
 
   const handleCloseZoom = () => setZoomOpen(false);
@@ -37,11 +47,11 @@ export function DocumentPreview({ filePath, fileName, className }: DocumentPrevi
     <>
       <div
         className={`${styles.preview} ${className ?? ""}`}
-        role={canShowPdf ? "button" : undefined}
-        tabIndex={canShowPdf ? 0 : undefined}
-        onClick={canShowPdf ? handlePreviewClick : undefined}
+        role={canPreview ? "button" : undefined}
+        tabIndex={canPreview ? 0 : undefined}
+        onClick={canPreview ? handlePreviewClick : undefined}
         onKeyDown={
-          canShowPdf
+          canPreview
             ? (e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
@@ -53,11 +63,19 @@ export function DocumentPreview({ filePath, fileName, className }: DocumentPrevi
       >
         {canShowPdf ? (
           <div className={styles.previewFrame}>
-            <embed
-              src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=1`}
-              type="application/pdf"
+            <iframe
+              src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=1`}
               className={styles.embed}
               title={fileName}
+            />
+            <p className={styles.clickHint}>Click to zoom and review document</p>
+          </div>
+        ) : canShowImage ? (
+          <div className={styles.previewFrame}>
+            <img
+              src={fileUrl!}
+              alt={fileName}
+              className={styles.imagePreview}
             />
             <p className={styles.clickHint}>Click to zoom and review document</p>
           </div>
@@ -69,7 +87,7 @@ export function DocumentPreview({ filePath, fileName, className }: DocumentPrevi
         )}
       </div>
 
-      {zoomOpen && canShowPdf && (
+      {zoomOpen && canPreview && (
         <div
           className={styles.zoomOverlay}
           onClick={handleCloseZoom}
@@ -93,12 +111,19 @@ export function DocumentPreview({ filePath, fileName, className }: DocumentPrevi
               </button>
             </div>
             <div className={styles.zoomFrame}>
-              <embed
-                src={`${pdfUrl}#toolbar=1&navpanes=1`}
-                type="application/pdf"
-                className={styles.zoomEmbed}
-                title={fileName}
-              />
+              {canShowPdf ? (
+                <iframe
+                  src={`${fileUrl}#toolbar=1&navpanes=1`}
+                  className={styles.zoomEmbed}
+                  title={fileName}
+                />
+              ) : canShowImage ? (
+                <img
+                  src={fileUrl!}
+                  alt={fileName}
+                  className={styles.zoomImage}
+                />
+              ) : null}
             </div>
           </div>
         </div>

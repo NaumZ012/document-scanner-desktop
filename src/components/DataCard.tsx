@@ -1,8 +1,9 @@
-import { memo } from "react";
+import { memo, useState, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
 import type { ExtractedField } from "@/shared/types";
 import { FIELD_INPUT_TYPE, FIELD_TEXTAREA } from "@/shared/constants";
 import type { FieldKey } from "@/shared/constants";
+import { formatAmountForDisplay } from "@/utils/fieldUtils";
 import styles from "./DataCard.module.css";
 
 interface DataCardProps {
@@ -18,9 +19,49 @@ function DataCardInner({ field, onChange, placeholderPrefix = "Enter" }: DataCar
   const hasValue = !!field.value?.trim();
   const inputType = FIELD_INPUT_TYPE[field.key as FieldKey];
   const useTextarea = FIELD_TEXTAREA.includes(field.key as FieldKey);
+  const isAmount = inputType === "amount";
   const type =
     inputType === "date" ? "date" : inputType === "amount" ? "text" : "text";
   const placeholder = hasValue ? "" : `${placeholderPrefix} ${field.label.toLowerCase()}`;
+
+  // For amount fields, format for display but store raw value
+  const [displayValue, setDisplayValue] = useState<string>("");
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      // Only update display value when not focused (to avoid interfering with user typing)
+      if (isAmount && field.value) {
+        setDisplayValue(formatAmountForDisplay(field.value));
+      } else {
+        setDisplayValue(field.value);
+      }
+    }
+  }, [field.value, isAmount, isFocused]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    setDisplayValue(newValue);
+    if (isAmount) {
+      // Parse formatted value back to raw format for storage (replace comma with period)
+      const raw = newValue.replace(/,/g, ".");
+      onChange(field.key, raw);
+    } else {
+      onChange(field.key, newValue);
+    }
+  };
+
+  const handleBlur = () => {
+    setIsFocused(false);
+    // Re-format on blur to ensure proper formatting
+    if (isAmount && field.value) {
+      setDisplayValue(formatAmountForDisplay(field.value));
+    }
+  };
+
+  const handleFocus = () => {
+    setIsFocused(true);
+  };
 
   return (
     <div className={`${styles.card} ${isLowConfidence ? styles.lowConfidence : ""} ${hasValue ? styles.filled : ""}`}>
@@ -28,8 +69,10 @@ function DataCardInner({ field, onChange, placeholderPrefix = "Enter" }: DataCar
       {useTextarea ? (
         <textarea
           className={styles.textarea}
-          value={field.value}
-          onChange={(e) => onChange(field.key, e.target.value)}
+          value={displayValue}
+          onChange={handleChange}
+          onBlur={handleBlur}
+          onFocus={handleFocus}
           placeholder={placeholder}
           rows={3}
         />
@@ -37,8 +80,10 @@ function DataCardInner({ field, onChange, placeholderPrefix = "Enter" }: DataCar
         <input
           type={type}
           className={styles.input}
-          value={field.value}
-          onChange={(e) => onChange(field.key, e.target.value)}
+          value={displayValue}
+          onChange={handleChange}
+          onBlur={handleBlur}
+          onFocus={handleFocus}
           placeholder={placeholder}
           inputMode={inputType === "amount" ? "decimal" : undefined}
         />

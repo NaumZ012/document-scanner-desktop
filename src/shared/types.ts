@@ -49,6 +49,21 @@ export interface InvoiceData {
   fields: Record<string, InvoiceFieldValue>;
   /** Original PDF filename (set by batch_scan_invoices). */
   source_file?: string;
+  /** Full file path for preview (set by batch_scan_invoices). */
+  source_file_path?: string;
+}
+
+/** Information about a failed scan attempt. */
+export interface FailedScan {
+  file_path: string;
+  file_name: string;
+  error: string;
+}
+
+/** Result of batch scanning, containing both successful and failed scans. */
+export interface BatchScanResult {
+  successes: InvoiceData[];
+  failures: FailedScan[];
 }
 
 /** Excel schema from schemaService.analyzeSchema (for mapping and write). */

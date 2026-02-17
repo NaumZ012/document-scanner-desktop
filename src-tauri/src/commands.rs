@@ -4,7 +4,7 @@ use crate::excel;
 use crate::models::ExcelSchema;
 use crate::ocr;
 use crate::services::excel_scanner;
-use crate::types::{InvoiceData, RowCell};
+use crate::types::{InvoiceData, RowCell, FailedScan, BatchScanResult};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -158,20 +158,24 @@ pub fn run_ocr(file_path: String) -> Result<crate::types::OcrResult, String> {
 }
 
 #[tauri::command]
-pub async fn run_ocr_invoice(file_path: String) -> Result<crate::types::InvoiceData, String> {
+pub async fn run_ocr_invoice(file_path: String, document_type: Option<String>) -> Result<crate::types::InvoiceData, String> {
     let path = file_path.clone();
-    tauri::async_runtime::spawn_blocking(move || ocr::run_ocr_invoice(&path))
+    let doc_type = document_type.clone();
+    tauri::async_runtime::spawn_blocking(move || ocr::run_ocr_invoice(&path, doc_type.as_deref()))
         .await
         .map_err(|e| e.to_string())?
 }
 
-/// Run OCR on up to 5 PDFs at a time; returns only successful results with source_file set.
+/// Run OCR on up to 5 PDFs at a time; returns both successful and failed results.
 #[tauri::command]
-pub async fn batch_scan_invoices(pdf_paths: Vec<String>) -> Result<Vec<InvoiceData>, String> {
+pub async fn batch_scan_invoices(pdf_paths: Vec<String>, document_type: Option<String>) -> Result<BatchScanResult, String> {
     const CONCURRENCY: usize = 5;
-    let mut results = Vec::with_capacity(pdf_paths.len());
+    let mut successes = Vec::new();
+    let mut failures = Vec::new();
+    let doc_type = document_type.clone();
+    
     for chunk in pdf_paths.chunks(CONCURRENCY) {
-        let handles: Vec<_> = chunk
+        let chunk_paths: Vec<(String, String)> = chunk
             .iter()
             .map(|path| {
                 let path = path.clone();
@@ -180,22 +184,47 @@ pub async fn batch_scan_invoices(pdf_paths: Vec<String>) -> Result<Vec<InvoiceDa
                     .and_then(|o| o.to_str())
                     .unwrap_or("")
                     .to_string();
+                (path, filename)
+            })
+            .collect();
+        
+        let handles: Vec<_> = chunk_paths
+            .iter()
+            .map(|(path, _)| {
+                let path = path.clone();
+                let doc_type = doc_type.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    ocr::run_ocr_invoice(&path).map(|mut data| {
-                        data.source_file = Some(filename);
-                        data
-                    })
+                    ocr::run_ocr_invoice(&path, doc_type.as_deref())
                 })
             })
             .collect();
-        for h in handles {
-            if let Ok(Ok(inv)) = h.await {
-                results.push(inv);
+        
+        for ((path, filename), h) in chunk_paths.into_iter().zip(handles) {
+            match h.await {
+                Ok(Ok(mut inv)) => {
+                    inv.source_file = Some(filename.clone());
+                    inv.source_file_path = Some(path.clone());
+                    successes.push(inv);
+                }
+                Ok(Err(e)) => {
+                    failures.push(FailedScan {
+                        file_path: path,
+                        file_name: filename,
+                        error: e,
+                    });
+                }
+                Err(e) => {
+                    failures.push(FailedScan {
+                        file_path: path,
+                        file_name: filename,
+                        error: format!("Task join error: {}", e),
+                    });
+                }
             }
-            // On join error or OCR error we skip this invoice (log could be added)
         }
     }
-    Ok(results)
+    
+    Ok(BatchScanResult { successes, failures })
 }
 
 #[tauri::command]
@@ -505,14 +534,25 @@ pub async fn append_to_excel_fast(
 
     let row_number = schema.next_free_row;
     let mut column_values = Vec::new();
-    for h in &schema.headers {
-        let field_key = column_mapping
-            .get(&h.column_letter)
-            .or_else(|| column_mapping.get(&h.column_letter.to_uppercase()));
-        let value = field_key
-            .and_then(|k| invoice_data.fields.get(k))
-            .map(|v| v.value.clone())
-            .unwrap_or_default();
+    for (idx, h) in schema.headers.iter().enumerate() {
+        let value = if idx == 0 {
+            invoice_data
+                .fields
+                .get("document_type")
+                .map(|v| v.value.clone())
+                .unwrap_or_else(|| "Фактура".to_string())
+        } else {
+            let field_key = column_mapping
+                .get(&h.column_letter)
+                .or_else(|| column_mapping.get(&h.column_letter.to_uppercase()))
+                .map(String::from)
+                .unwrap_or_else(|| format!("col_{}", h.column_letter));
+            invoice_data
+                .fields
+                .get(&field_key)
+                .map(|v| v.value.clone())
+                .unwrap_or_default()
+        };
         column_values.push((h.column_letter.clone(), value));
     }
 
