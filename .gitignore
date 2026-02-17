@@ -12,6 +12,7 @@ example/
 
 # Office temp files and workbooks
 ~$*
+src-tauri/~$*
 *.xlsx
 *.xlsm
 *.xlsb
