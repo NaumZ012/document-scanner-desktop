@@ -1,0 +1,88 @@
+{
+  "name": "LogisticsFreightInvoiceAnalyzer",
+  "description": "Custom analyzer for extracting structured data from highly variable, multi-page Macedonian and international transport/logistics invoices (freight invoices up to 10 pages).",
+  "fieldSchema": {
+    "fields": {
+      "documentType": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract ONLY the document type label—nothing else. Return just the type as written on the document (e.g. 'Фактура', 'Фактура / испратница', 'Фактура на големо', 'INVOICE', 'Credit note', 'FAKTURA'). Do NOT include: the document number, 'бр.:', 'No.', 'Nr.', 'ЕДБ:', tax ID, or any digits. If the heading says 'Фактура / испратница бр.: 2411024690', return only 'Фактура / испратница'. If it says 'Фактура Бр. 00121-01-2025', return only 'Фактура'. Look for the type in the main title or 'Вид на документ' / 'Document type' area; ignore fields like 'Сметка:', 'ЕДБ:' which are other labels. Output only the type phrase for MIS."
+      },
+      "invoiceNumber": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the primary invoice number that uniquely identifies this logistics or freight invoice. Scan all pages, especially the header and summary sections, for labels and patterns such as 'Фактура бр.', 'Фактура број', 'Фактура No.', 'Број на фактура', 'Invoice #', 'Invoice No.', 'Inv. No.'. Distinguish this from other reference numbers like CMR, shipment or tracking numbers, and only return the value that clearly represents the invoice number."
+      },
+      "date": {
+        "type": "date",
+        "method": "extract",
+        "description": "Extract the invoice issue date for the logistics/freight document. Look for Macedonian and bilingual labels like 'Дата на документ', 'Датум на фактура', 'Датум издавање', 'Issued on', 'Invoice Date'. Normalize typical local formats such as '24.02.2025', '24-02-2025', or '24/02/2025' into a proper date value. If multiple dates appear (for example, loading date, delivery date, period dates), choose the one explicitly labeled as the invoice date."
+      },
+      "dueDate": {
+        "type": "date",
+        "method": "extract",
+        "description": "Extract the payment due date for the freight invoice. Search for Macedonian phrases such as 'Рок на плаќање', 'Доспева на', 'Валутен рок', as well as English terms like 'Due Date', 'Payment Due'. The due date may appear near totals or payment terms; if multiple candidate dates exist, choose the one clearly associated with when payment is expected."
+      },
+      "sellerName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the full legal name of the transport/logistics service provider (seller). Look for labels and context like 'Продавач', 'Превозник', 'Транспортна компанија', 'Издавач', or English/German equivalents such as 'Carrier', 'Forwarder', 'Logistics Provider', 'Seller', 'Supplier', 'Vendor', 'Spediteur'. This name is usually found in the header or company block together with address and tax ID information."
+      },
+      "sellerAddress": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the complete postal address of the seller (transport/logistics company), including street, number, city, postal code, and country where available. Look near the seller name for labels like 'Адреса', 'Седиште', 'Address', 'Head Office'. The address may span multiple lines; merge adjacent address lines into one string and avoid mixing in bank details or contact persons."
+      },
+      "sellerTaxId": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the seller’s tax identification number (for example Macedonian ЕДБ, VAT number, or PIB). Search for labels such as 'ЕДБ', 'Даночен број', 'ДДВ број', 'VAT ID', 'VAT No.', 'Tax ID'. Return the normalized tax number only, not the label. Ensure that the tax ID belongs to the seller (carrier/forwarder), not to the buyer."
+      },
+      "buyerName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the full legal name of the buyer (customer) who is being billed for the transport/logistics services. Look for labels like 'Купувач', 'Примач на фактура', 'Клиент', 'Нарачател', or English equivalents such as 'Buyer', 'Customer', 'Bill To'. This block often appears opposite the seller block or near the top of the first page."
+      },
+      "buyerAddress": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the full postal or billing address of the buyer, including street, number, city, postal code, and country where available. Look near the buyer name for labels like 'Адреса на купувач', 'Адреса на примач', 'Buyer address', 'Bill To address'. Combine multi-line address segments into a single string, and ignore unrelated information such as bank details or contact persons."
+      },
+      "buyerTaxId": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the buyer’s tax identification number, if it is present. Look for labels such as 'Даночен број купувач', 'Матичен број купувач', 'Buyer VAT ID', 'Tax ID (customer)'. Return the ID that is clearly linked to the buyer and not to the seller or another party."
+      },
+      "netAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the total net amount (before VAT/tax) for the entire freight invoice. Search all pages for Macedonian and bilingual labels such as 'Нето износ', 'Основица', 'Износ без ДДВ', 'Subtotal', 'Net Amount'. In multi-page invoices, ignore per-page subtotals and instead return the final subtotal that represents the whole document."
+      },
+      "vatTax": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the total VAT or tax amount on the logistics/freight invoice. Look for labels like 'ДДВ', 'Вкупно ДДВ', 'Tax', 'VAT Amount', 'Total VAT'. Some invoices show a VAT breakdown by rate; return the combined VAT total for the invoice, not individual per-rate values."
+      },
+      "totalAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the grand total amount due, including all taxes, for the complete freight invoice. Look across all pages for strong labels such as 'Вкупно за плаќање', 'Вкупно', 'За наплата', 'Вкупен износ', 'Total Amount', 'Grand Total', 'Amount Due'. Where multiple totals exist (per page or per currency), choose the amount clearly marked as the final amount the buyer must pay."
+      },
+      "currency": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the main currency of the invoice as a three-letter code where possible (for example 'MKD', 'EUR', 'USD'). Look near totals and in amount columns for labels and tokens like 'Валута', 'MKD', 'EUR', 'USD', 'CHF', 'денари'. If multiple currencies are shown (local and reference), prefer the currency directly associated with the total amount due."
+      },
+      "reference": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract key reference identifiers that link this freight invoice to transport documents, such as purchase orders, transport orders, CMR numbers, shipment or consignment IDs. Look for labels like 'Референца', 'Нарачка бр.', 'Order No.', 'PO No.', 'CMR No.', 'Pratka No.', 'Shipment No.'. If multiple references are clearly related, combine them into a single string separated by semicolons and a space (for example, 'PO 12345; CMR 67890; Pratka 001/2025')."
+      },
+      "description": {
+        "type": "string",
+        "method": "generate",
+        "description": "Scan all pages. Find all narrative descriptions of the billed services. For transport and freight invoices, you MUST include all routing details (for example, 'HELSINGBORG-PUTTGARDEN', 'LODZ–Skopje', 'Скопје–Лоѓ'), vehicle and trailer plates (for example, labels or text like 'KAMION', 'Vehicle Plate', 'Trailer Plate', 'Регистарска табличка'), tracking and document numbers embedded in the text (for example, 'CMR', 'Pratka', 'Shipment', 'Delivery Note', 'Товарен лист'), and all surcharges and fees (for example, 'Energy Surcharge', 'Fuel Surcharge', 'Надоместок за животна средина', 'Environmental fee', 'Handling fee'). Concatenate every piece of descriptive text into one single, continuous string separated by semicolons and a space, preserving the natural wording that appears on the invoice (for example, 'International road transport HELSINGBORG–PUTTGARDEN; Route LODZ–Skopje; Vehicle plate SK-1234-AB; Trailer plate SK-5678-CD; CMR 123456; Energy Surcharge; Nadomestok za zivotna sredina'). Ignore the actual monetary prices, VAT amounts, and numeric quantities—FOCUS ONLY on the descriptive text and reference numbers that explain what services were provided and on which routes."
+      }
+    }
+  }
+}

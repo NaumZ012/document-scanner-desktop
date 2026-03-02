@@ -1,0 +1,63 @@
+{
+  "name": "TaxBalanceAnalyzer",
+  "description": "Custom analyzer for extracting structured data from Macedonian corporate tax balance documents (Даночен биланс, РД-Данок на добивка) so they can be summarized into Excel tax balance templates.",
+  "fieldSchema": {
+    "fields": {
+      "documentType": {
+        "type": "string",
+        "method": "generate",
+        "description": "Return a short label that identifies this as a corporate tax balance document, typically 'Даночен биланс'. If the title includes variations such as 'РД - Данок на добивка', 'Даночен биланс за данок на добивка', normalize to 'Даночен биланс'."
+      },
+      "year": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the financial year for which the tax balance is prepared. Look for labels and headings like 'За годината', 'За 2024 година', 'Година', 'Year', 'Период: 01.01.2024 - 31.12.2024'. Prefer the explicit year (e.g., '2024'); if only a period range is given, return the full period text."
+      },
+      "date": {
+        "type": "date",
+        "method": "extract",
+        "description": "Extract the date when the tax balance was prepared or signed. Search for 'Датум', 'Дата', 'Датум на изготвување', 'Датум на потпис', 'Date'. If multiple dates appear, choose the one explicitly associated with the signature or finalization of the tax balance, not the financial period dates."
+      },
+      "companyName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the full legal name of the company (даночен обврзник) that the tax balance refers to. Look near the top/header section for labels such as 'Друштво', 'Назив на даночен обврзник', 'Company', 'Taxpayer'. Return the complete company name without abbreviating or truncating."
+      },
+      "companyTaxId": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the company’s tax identification number (ЕДБ, даночен број). Search the identification section for labels like 'ЕДБ', 'Даночен број', 'Tax ID', 'VAT ID'. Return just the normalized ID string, and ensure it belongs to the company, not to a parent entity or tax authority."
+      },
+      "netAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the tax base for corporate income tax after all allowed adjustments (коригирана даночна основица). Look for lines and fields labeled 'Даночна основица', 'Даночна основица по корекции', 'Коригирана даночна основица', 'Tax base after adjustments'. Choose the amount that represents the final taxable base used to calculate the corporate income tax, not intermediate profit figures."
+      },
+      "taxAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the calculated corporate income tax amount based on the tax base. Search for labels like 'Пресметан данок на добивка', 'Данок на добивка', 'Corporate income tax', 'Income tax due'. Ignore preliminary or theoretical calculations and return the amount clearly identified as the final calculated tax for the year."
+      },
+      "totalAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the final corporate tax liability or refund amount arising from the tax balance. Look for summary fields such as 'За плаќање по даночен биланс', 'За поврат по даночен биланс', 'Конечна обврска', 'Final tax due', 'Amount payable / refundable'. If both payable and refundable values are shown, choose the one that is actually non-zero and labeled as the final result."
+      },
+      "currency": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the currency used in the tax balance, preferably as a three-letter code like 'MKD', 'EUR', 'USD'. Check the header or legend for 'Валута', 'MKD', 'денари', 'EUR', '€', and confirm it matches the currency of the base and tax amounts. Return the dominant currency for the reported figures."
+      },
+      "reference": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract any key reference identifiers related to the tax balance, such as form designation (e.g., 'РД'), internal reference numbers, or submission IDs. Look for 'Образец', 'РД', 'Референца', 'Reference', 'Broj prijave'. Combine multiple related references into a single string separated by semicolons and a space."
+      },
+      "description": {
+        "type": "string",
+        "method": "generate",
+        "description": "Generate a narrative summary of the tax balance by combining the year/period, company name, type of tax (данок на добивка), and a short description of the main figures (tax base, calculated tax, final amount payable or refundable) without reproducing detailed line-by-line calculations. Join the parts into one continuous string separated by semicolons and a space."
+      }
+    }
+  }
+}

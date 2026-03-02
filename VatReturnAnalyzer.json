@@ -1,0 +1,63 @@
+{
+  "name": "VatReturnAnalyzer",
+  "description": "Custom analyzer for extracting structured data from Macedonian VAT documents (ДДВ пријави, ДДВ извештаи, резиме на ДДВ обврски) in order to summarize tax base and VAT amounts into Excel VAT templates.",
+  "fieldSchema": {
+    "fields": {
+      "documentType": {
+        "type": "string",
+        "method": "generate",
+        "description": "Return a short label that identifies this as a VAT document, typically 'ДДВ'. If the document uses titles such as 'ДДВ пријава', 'ДДВ-04', 'Пресметка на ДДВ', or 'VAT return', normalize to a single value like 'ДДВ'."
+      },
+      "period": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the tax period covered by this VAT return. Search for labels like 'Период', 'Даночен период', 'За период', 'Од-До', and patterns such as '01.01.2025 - 31.01.2025', 'Јануари 2025', 'Q1 2025', '01/2025'. Return the full period text as it appears, not just a single date."
+      },
+      "date": {
+        "type": "date",
+        "method": "extract",
+        "description": "Extract the date on which the VAT return was created, signed, or submitted. Look for labels such as 'Датум', 'Дата', 'Датум на поднесување', 'Submission date', or 'Date'. If multiple dates exist (e.g., signature date vs. accounting period dates), choose the one explicitly tied to the return itself."
+      },
+      "taxpayerName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the full name of the VAT taxpayer (даночен обврзник). Look for labels like 'Назив на даночен обврзник', 'Даночен обврзник', 'Друштво', 'Company', 'Taxpayer'. Prefer the name in the tax identification section or heading, not the name of the tax authority."
+      },
+      "taxpayerTaxId": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the VAT ID / tax ID of the taxpayer. Search for fields labeled 'ЕДБ', 'Даночен број', 'Даночен број на обврзник', 'VAT ID', 'VAT Number', 'Tax ID'. Return the normalized ID string without the label or surrounding text, and ensure it belongs to the taxpayer and not the tax office."
+      },
+      "netAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the total taxable base (даночна основица вкупно) for the VAT period. Look for summary lines like 'Даночна основица вкупно', 'Вкупна даночна основица', 'Taxable base total', or sums that group all VAT rates together. If the document shows multiple bases per rate (e.g., 5%, 18%), aggregate only if a final 'вкупно' figure is given; otherwise choose the explicitly labeled total taxable base."
+      },
+      "vatTax": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the total VAT amount for the period (ДДВ вкупно). Search for labels such as 'ДДВ вкупно', 'Вкупно ДДВ', 'Данок на додадена вредност вкупно', 'VAT total', 'Total VAT'. Ignore intermediate per-rate VAT amounts unless the document does not contain an overall total; in that case, use the best available overall VAT sum that clearly represents the full liability for the period."
+      },
+      "totalAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the final amount to be paid or refunded according to the VAT return. Look for labels and summary sections like 'За плаќање', 'За поврат', 'Конечна обврска', 'Total to pay', 'Amount due', 'Refund amount'. If the document distinguishes between 'За плаќање' and 'За поврат', choose the one that is numerically non-zero and explicitly marked as the final outcome of the return."
+      },
+      "currency": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the currency associated with the VAT amounts, preferably as a three-letter code like 'MKD', 'EUR', 'USD'. Look for tokens and labels like 'Валута', 'MKD', 'денари', 'EUR', '€' near totals or in the form header. If more than one currency appears, use the one directly tied to the 'Даночна основица' and 'ДДВ' totals."
+      },
+      "reference": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract any important reference data for the VAT return, such as form type (e.g., 'ДДВ-04'), submission reference numbers, or internal document IDs. Look for labels like 'Референца', 'Број на пријава', 'Образец', 'Form type', 'Reference'. Combine multiple related references into a single string separated by semicolons and a space, preserving the original codes."
+      },
+      "description": {
+        "type": "string",
+        "method": "generate",
+        "description": "Generate a concise narrative description of the VAT return. Include the tax period, taxpayer name, a short mention of the type of return (e.g., 'редовна пријава', 'коригирана пријава'), and a summary of the main totals (taxable base, VAT, final amount payable/refundable) without re-listing detailed tables. Join these elements into one string separated by semicolons and a space."
+      }
+    }
+  }
+}

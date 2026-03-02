@@ -18,19 +18,21 @@
   color: var(--color-text-muted);
 }
 
-/* ----- Sticky top bar ----- */
-.stickyHeader {
-  position: sticky;
-  top: 0;
+/* ----- Fixed footer: title, subtitle, actions ----- */
+.fixedFooter {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
   z-index: 10;
   flex-shrink: 0;
   background: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
   padding: var(--space-md) var(--space-xl);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.headerInner {
+.footerInner {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -39,22 +41,27 @@
   margin: 0 auto;
 }
 
-.title {
+.footerTitle {
   font-size: 22px;
   font-weight: 600;
   margin: 0 0 var(--space-xs);
   color: var(--color-text);
 }
 
-.subtitle {
+.footerSubtitle {
   font-size: 13px;
   color: var(--color-text-muted);
   margin: 0;
 }
 
-.headerActions {
+.footerActions {
   display: flex;
   gap: var(--space-md);
+}
+
+/* Reserve space so scrollable list is not hidden behind footer */
+.scrollAreaWithFooter {
+  padding-bottom: 72px;
 }
 
 .primaryButton {
@@ -85,7 +92,7 @@
   background: var(--color-surface-hover);
 }
 
-/* ----- Scrollable card list ----- */
+/* ----- Scrollable card list (above fixed footer) ----- */
 .scrollArea {
   flex: 1;
   min-height: 0;
@@ -268,6 +275,62 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ----- Schema fields: one row per field (label + value), no raw dump ----- */
+.schemaFieldsList {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.schemaFieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: var(--space-md);
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.schemaFieldRowWithConfidence {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 56px;
+  gap: var(--space-md);
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.schemaFieldLabel {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.schemaFieldValue {
+  color: var(--color-text);
+  word-break: break-word;
+  text-align: right;
+}
+
+.schemaFieldConfidence {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .schemaFieldRow,
+  .schemaFieldRowWithConfidence {
+    grid-template-columns: 1fr;
+    gap: var(--space-xs);
+  }
+  .schemaFieldValue,
+  .schemaFieldConfidence {
+    text-align: left;
+  }
+}
+
 /* ----- Description: full-width row ----- */
 .cardDescRow {
   margin-top: var(--space-sm);
@@ -432,6 +495,82 @@
   padding: 0;
   display: flex;
   flex-direction: column;
+}
+
+.previewModalContentSplit {
+  flex-direction: row;
+}
+
+.previewPane {
+  flex: 1.2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.previewPaneRight {
+  flex: 1;
+  min-width: 280px;
+  max-width: 420px;
+  min-height: 0;
+  border-left: 1px solid var(--color-border);
+  padding: var(--space-md) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  background: var(--color-bg-soft);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.previewFieldsTitle {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.previewFieldsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm) var(--space-md);
+}
+
+.previewField,
+.previewFieldFull {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.previewFieldFull {
+  grid-column: 1 / -1;
+}
+
+.previewFieldLabel {
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.previewFieldValue,
+.previewFieldValueBlock {
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.previewFieldValueBlock {
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.previewFieldValueInvalid {
+  color: var(--color-danger, #dc2626);
 }
 
 .previewIframe {

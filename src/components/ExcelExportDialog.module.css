@@ -57,6 +57,12 @@
   margin-bottom: var(--space-xs);
 }
 
+.hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-sm);
+}
+
 .input {
   width: 100%;
   font-size: 14px;

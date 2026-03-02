@@ -1,0 +1,139 @@
+{
+	"analyzerId": "TaxBalance02",
+	"description": "",
+	"createdAt": "2026-02-25T11:04:29Z",
+	"lastModifiedAt": "2026-02-25T11:04:31Z",
+	"baseAnalyzerId": "prebuilt-document",
+	"config": {
+		"returnDetails": true,
+		"enableOcr": true,
+		"enableLayout": true,
+		"enableFormula": true,
+		"enableFigureDescription": true,
+		"enableFigureAnalysis": true,
+		"chartFormat": "chartjs",
+		"tableFormat": "html",
+		"estimateFieldSourceAndConfidence": true,
+		"enableSegment": false,
+		"omitContent": false,
+		"segmentPerPage": false,
+		"annotationFormat": "markdown"
+	},
+	"warnings": [],
+	"status": "ready",
+	"processingLocation": "geography",
+	"supportedModels": {
+		"completion": [
+			"gpt-4o",
+			"gpt-4o-mini",
+			"gpt-4.1",
+			"gpt-4.1-mini",
+			"gpt-4.1-nano"
+		],
+		"embedding": [
+			"text-embedding-3-small",
+			"text-embedding-3-large",
+			"text-embedding-ada-002"
+		]
+	},
+	"models": {
+		"completion": "gpt-4.1",
+		"embedding": "text-embedding-3-large"
+	},
+	"fieldSchema": {
+		"fields": {
+			"taxYear": {
+				"type": "string",
+				"method": "extract",
+				"description": "Tax year of the return (пример: '2024'). Look for labels like 'Година', 'Даночен период' near the top of the Даночен биланс form."
+			},
+			"companyName": {
+				"type": "string",
+				"method": "extract",
+				"description": "Full legal name of the taxpayer company. Look for 'Обврзник', 'Фирма', 'Даночен обврзник' in the header section."
+			},
+			"companyTaxId": {
+				"type": "string",
+				"method": "extract",
+				"description": "Tax identification number (ЕДБ / даночен број) of the company. Look for 'ЕДБ', 'Даночен број', 'Tax ID' near the company name."
+			},
+			"financialResultFromPL": {
+				"type": "number",
+				"method": "extract",
+				"description": "Section I total – 'Финансиски резултат во Биланс на успех'. This is the first big number in the table ДОБИВКА НА НЕПРИЗНАЕНИ РАСХОДИ, often in the row marked I with index 1."
+			},
+			"nonRecognizedExpensesTotal": {
+				"type": "number",
+				"method": "extract",
+				"description": "Section II total – 'Непризнаени расходи за даночни цели (збир од АОП 03 до АОП 29)'. Sum of all non-recognized expenses for tax purposes."
+			},
+			"nonRecognizedExpenseRows": {
+				"type": "array",
+				"method": "extract",
+				"description": "Optional detailed list of the individual непризнаени расходи rows under Section II (rows 3–39). Each element corresponds to one line such as 'Трошоци кои не се поврзани со вршење на дејноста', 'Исплатени надоместоци', 'Трошоци за репрезентација', 'Други усогласувања на расходи'.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"lineNumber": {
+							"type": "number",
+							"description": "Line index from the Даночен биланс table (e.g. 3, 4, …, 39)."
+						},
+						"label": {
+							"type": "string",
+							"description": "Macedonian label of the expense line (for example 'Трошоци за репрезентација', 'Други усогласувања на расходи')."
+						},
+						"amount": {
+							"type": "number",
+							"description": "Numeric amount for this specific non-recognized expense line."
+						}
+					}
+				}
+			},
+			"taxBaseBeforeReduction": {
+				"type": "number",
+				"method": "extract",
+				"description": "Section III – 'Даночна основа (I+II)'. Tax base before any reductions. Look for the row with Roman numeral III and text 'Даночна основа (I+II)'."
+			},
+			"taxBaseReductionTotal": {
+				"type": "number",
+				"method": "extract",
+				"description": "Section IV total – 'Намалување на даночна основа (АОП 32+АОП33+АОП34+АОП35+АОП36)'. Sum of all reduction items in Section IV."
+			},
+			"taxBaseAfterReduction": {
+				"type": "number",
+				"method": "extract",
+				"description": "Section V – 'Даночна основа по намалување (III-IV)'. Tax base after reduction, computed as Section III minus Section IV."
+			},
+			"calculatedProfitTax": {
+				"type": "number",
+				"method": "extract",
+				"description": "Section VI – 'Пресметан данок на добивка (V x 10%)'. Calculated profit tax (usually 10% of the tax base after reduction)."
+			},
+			"calculatedTaxReductionTotal": {
+				"type": "number",
+				"method": "extract",
+				"description": "Section VII total – 'Намалување на пресметаниот данок на добивка (АОП40+АОП41+АОП42)'. Sum of all reductions of the calculated tax."
+			},
+			"calculatedTaxAfterReduction": {
+				"type": "number",
+				"method": "extract",
+				"description": "Section VIII – 'Пресметан данок по намалување (VI-VII)'. Final calculated profit tax after reductions, equal to Section VI minus Section VII."
+			},
+			"advanceTaxPaid": {
+				"type": "number",
+				"method": "extract",
+				"description": "Line 57 – 'Платени аконтации на данокот на добивка за даночниот период'. Total advance profit tax payments for the year."
+			},
+			"overpaidCarriedForward": {
+				"type": "number",
+				"method": "extract",
+				"description": "Line 58 – 'Износ на повеќе платен данок на добивка пренесен од претходните даночни периоди'. Amount of overpaid tax carried forward from previous years (can be 0)."
+			},
+			"amountToPayOrOverpaid": {
+				"type": "number",
+				"method": "extract",
+				"description": "Line 59 – 'Износ за доплата / повеќе платен износ (АОП 44 - АОП 45 - АОП 46)'. Final balance of the tax return: positive value means tax to pay ('доплата'), negative value means overpayment ('повеќе платен износ')."
+			}
+		}
+	}
+}

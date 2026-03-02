@@ -5,7 +5,13 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { getHistory, getFolders, createFolder, deleteFolder, assignHistoryToFolder, deleteHistoryRecord } from "@/services/api";
 import type { ExtractedField } from "@/shared/types";
 import type { OcrResult } from "@/shared/types";
-import { FIELD_LABELS } from "@/shared/constants";
+import {
+  FIELD_LABELS,
+  TAX_FIELD_LABELS_MK,
+  DDV_FIELD_LABELS_MK,
+  PAYROLL_FIELD_LABELS_MK,
+} from "@/shared/constants";
+import { sanitizeDescription } from "@/utils/parseAzureExtraction";
 import styles from "./History.module.css";
 
 type HistoryRow = [
@@ -35,7 +41,7 @@ function fileNameFromPath(pathOrName: string): string {
   return parts[parts.length - 1] || pathOrName;
 }
 
-function parseExtractedData(raw: string): Record<string, string> {
+function parseExtractedData(raw: string): Record<string, unknown> {
   if (!raw.trim()) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -47,11 +53,90 @@ function parseExtractedData(raw: string): Record<string, string> {
 
 function extractedDataToFields(extractedDataJson: string): ExtractedField[] {
   const data = parseExtractedData(extractedDataJson);
-  return Object.entries(data).map(([key, value]) => ({
-    key,
-    value: String(value ?? ""),
-    label: (FIELD_LABELS as Record<string, string>)[key] ?? key.replace(/_/g, " "),
-  }));
+  const confidenceMap =
+    typeof data._confidence === "object" && data._confidence !== null && !Array.isArray(data._confidence)
+      ? (data._confidence as Record<string, number>)
+      : {};
+  return Object.entries(data)
+    .filter(([key]) => key !== "_confidence")
+    .map(([key, raw]) => {
+      let value = String(raw ?? "");
+      if (key === "description" && value) {
+        value = sanitizeDescription(value);
+      }
+      const label =
+        (FIELD_LABELS as Record<string, string>)[key] ??
+        TAX_FIELD_LABELS_MK[key] ??
+        DDV_FIELD_LABELS_MK[key] ??
+        PAYROLL_FIELD_LABELS_MK[key] ??
+        key.replace(/_/g, " ");
+      return {
+        key,
+        value,
+        confidence: confidenceMap[key],
+        label,
+      };
+    });
+}
+
+/** Infer logical document type from extracted data keys (fallback when DB type is generic/faktura). */
+function inferDocumentTypeFromExtractedData(
+  extractedDataJson: string,
+  fallback: string
+): string {
+  const data = parseExtractedData(extractedDataJson);
+  const keysArr = Object.keys(data).filter((k) => k !== "_confidence");
+  const keys = new Set(keysArr);
+
+  // Даночен биланс (Tax balance)
+  const hasAopKey =
+    keysArr.some((k) => k.startsWith("aop_")) ||
+    keysArr.some((k) => /AOP\d+/i.test(k));
+  if (
+    hasAopKey ||
+    keys.has("finansiskiRezultatAOP1") ||
+    keys.has("companyTaxId") ||
+    keys.has("taxPeriodStart") ||
+    keys.has("taxPeriodEnd") ||
+    keys.has("financialResultFromPL") ||
+    keys.has("taxBaseAfterReduction") ||
+    keys.has("calculatedProfitTax") ||
+    keys.has("amountToPayOrOverpaid")
+  ) {
+    return "smetka";
+  }
+
+  // ДДВ (VAT return)
+  if (
+    keys.has("prometOpshtaStapkaOsnova") ||
+    keys.has("vlezenPrometOsnova") ||
+    keys.has("danochenDolgIliPobaruvanje") ||
+    keys.has("taxPeriod") ||
+    keys.has("totalTaxBase") ||
+    keys.has("totalOutputVat") ||
+    keys.has("vatPayableOrRefund")
+  ) {
+    return "generic";
+  }
+
+  // Плати (Payroll)
+  if (
+    keys.has("brutoPlata") ||
+    keys.has("vkupnaNetoPlata") ||
+    keys.has("pridonesPIO") ||
+    keys.has("pridonesZdravstvo") ||
+    keys.has("pridonesProfesionalnoZaboluvanje") ||
+    keys.has("pridonesVrabotuvanje") ||
+    keys.has("personalenDanok") ||
+    keys.has("year") ||
+    keys.has("totalGrossSalary") ||
+    keys.has("totalNetSalary") ||
+    keys.has("totalPayrollCost")
+  ) {
+    return "plata";
+  }
+
+  return fallback;
 }
 
 function rowToReviewState(row: HistoryRow): {
@@ -64,19 +149,21 @@ function rowToReviewState(row: HistoryRow): {
   fromHistory: true;
   status: string;
 } {
-  const [id, , docType, filePathOrName, extractedDataJson, rowStatus] = row;
+  const [id, createdAt, docType, filePathOrName, extractedDataJson, rowStatus] = row;
   const filePath = filePathOrName;
   const fileName = fileNameFromPath(filePathOrName);
+  const inferredType = inferDocumentTypeFromExtractedData(extractedDataJson || "{}", docType);
   const fields = extractedDataToFields(extractedDataJson || "{}");
   return {
     filePath,
     fileName,
     ocrResult: { lines: [], content: "" },
-    documentType: docType,
+    documentType: inferredType,
     fields,
     historyId: id,
     fromHistory: true,
     status: rowStatus ?? "pending",
+    historyCreatedAt: createdAt,
   };
 }
 

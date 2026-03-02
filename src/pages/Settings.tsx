@@ -6,7 +6,6 @@ import { useTranslations } from "@/hooks/useTranslations";
 import {
   openAppDataFolder,
   getFolders,
-  getProfiles,
   getAppVersion,
   getAzureStatus,
   clearLearnedMappings,
@@ -102,14 +101,10 @@ export function Settings() {
   const docTypeLabels = isMk ? DOC_TYPE_LABELS_MK : DOC_TYPE_LABELS;
 
   const [folders, setFolders] = useState<[number, string, string][]>([]);
-  const [profiles, setProfiles] = useState<[number, string, string, string, string][]>([]);
   const [appVersion, setAppVersion] = useState<string>("");
   const [azureStatus, setAzureStatus] = useState<string>("");
   useEffect(() => {
     getFolders().then(setFolders).catch(() => setFolders([]));
-  }, []);
-  useEffect(() => {
-    getProfiles().then(setProfiles).catch(() => setProfiles([]));
   }, []);
   useEffect(() => {
     getAppVersion().then(setAppVersion).catch(() => setAppVersion("—"));
@@ -298,26 +293,6 @@ export function Settings() {
             </button>
           ))}
         </div>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("defaultProfile")}</h2>
-        <p className={styles.sectionHint}>Initial Excel profile on Review page</p>
-        <select
-          className={styles.select}
-          value={defaultProfileId ?? ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            setDefaultProfileId(v === "" ? null : Number(v));
-          }}
-        >
-          <option value="">{t("none")}</option>
-          {profiles.map(([id, name]) => (
-            <option key={id} value={id}>
-              {name}
-            </option>
-          ))}
-        </select>
       </section>
 
       <section className={styles.section}>

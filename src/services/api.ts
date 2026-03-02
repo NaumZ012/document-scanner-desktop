@@ -1,5 +1,37 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { OcrResult, InvoiceData } from "@/shared/types";
+import type { OcrResult, InvoiceData, OcrInvoiceResult } from "@/shared/types";
+import type { ExtractedField } from "@/shared/types";
+import {
+  parseAzureExtraction,
+  parseAzureFieldsWithConfidence,
+  parsedExtractionToInvoiceData,
+} from "@/utils/parseAzureExtraction";
+
+/** Build extracted_data payload for history: key-value plus _confidence so the Review page can show confidence %. */
+export function buildExtractedDataWithConfidence(fields: ExtractedField[]): Record<string, unknown> {
+  const data: Record<string, unknown> = Object.fromEntries(fields.map((f) => [f.key, f.value]));
+  const conf: Record<string, number> = {};
+  for (const f of fields) {
+    if (f.confidence != null) conf[f.key] = f.confidence;
+  }
+  if (Object.keys(conf).length > 0) data._confidence = conf;
+  return data;
+}
+
+/** Build extracted_data with _confidence from InvoiceData.fields (e.g. after batch scan). */
+export function buildExtractedDataFromInvoiceFields(
+  fields: Record<string, { value: string; confidence?: number }>
+): Record<string, unknown> {
+  const data: Record<string, unknown> = Object.fromEntries(
+    Object.entries(fields).map(([k, v]) => [k, v.value])
+  );
+  const conf: Record<string, number> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v.confidence != null) conf[k] = v.confidence;
+  }
+  if (Object.keys(conf).length > 0) data._confidence = conf;
+  return data;
+}
 
 export async function getAppDataPath(): Promise<string> {
   return invoke<string>("get_app_data_path");
@@ -26,7 +58,104 @@ export async function runOcr(filePath: string): Promise<OcrResult> {
 }
 
 export async function runOcrInvoice(filePath: string, documentType?: string): Promise<InvoiceData> {
-  return invoke<InvoiceData>("run_ocr_invoice", { filePath, documentType: documentType ?? null });
+  const result = await invoke<OcrInvoiceResult>("run_ocr_invoice", {
+    filePath,
+    documentType: documentType ?? null,
+  });
+
+  const hasRaw = result?.raw_azure_fields != null && typeof result.raw_azure_fields === "object" && !Array.isArray(result.raw_azure_fields);
+  const backendFields = result?.invoice_data?.fields ?? {};
+  const backendCount = Object.keys(backendFields).filter((k) => (backendFields[k]?.value ?? "").toString().trim() !== "").length;
+
+  // 3. Debug: always log what we received so we can see why UI is empty
+  console.log("=== OCR RESULT ===", {
+    hasRawAzureFields: hasRaw,
+    rawKeys: hasRaw ? Object.keys(result!.raw_azure_fields!) : [],
+    backendFieldCount: Object.keys(backendFields).length,
+    backendFilledCount: backendCount,
+    sampleBackend: Object.fromEntries(Object.entries(backendFields).slice(0, 5)),
+  });
+  if (hasRaw) {
+    console.log("=== RAW AZURE FIELDS ===", JSON.stringify(result!.raw_azure_fields, null, 2));
+  }
+
+  // 1. Data mapping: parse raw Azure .valueString / .valueNumber / .valueDate into canonical keys
+  // 2. Description sanitized inside parseAzureExtraction (strip ``` blocks)
+  const base: InvoiceData = {
+    fields: { ...backendFields },
+    source_file: result?.invoice_data?.source_file,
+    source_file_path: result?.invoice_data?.source_file_path,
+  };
+
+  if (hasRaw) {
+    const raw = result!.raw_azure_fields as Record<string, Record<string, unknown>>;
+    // Confidence is only from Azure API (never hardcoded); UI shows "—" when missing.
+    const withConfidence = parseAzureFieldsWithConfidence(raw);
+    for (const [k, fv] of Object.entries(withConfidence)) {
+      if (fv.value.trim() !== "" || fv.value === "0") {
+        base.fields[k] = { value: fv.value, confidence: fv.confidence };
+      }
+    }
+    const parsed = parseAzureExtraction(raw);
+    for (const [k, v] of Object.entries(parsed)) {
+      const val = v ?? "";
+      const strVal = String(val);
+      const isZero = val === 0 || strVal.trim() === "0";
+      if (isZero) {
+        base.fields[k] = { value: "0", confidence: base.fields[k]?.confidence };
+      } else if (strVal.trim() !== "" && !(k in base.fields)) {
+        base.fields[k] = { value: strVal, confidence: undefined };
+      }
+    }
+
+    // Extra safety for Даночен биланс: map any Azure field ending with AOP1…AOP59
+    // (e.g. "namaluvanjeDanokFiskalniSistemiAOP52") into our canonical "aop_52" keys.
+    // This guarantees that even if backend mapping misses a field, the UI still sees it.
+    if (documentType === "smetka") {
+      for (const [azureKey, rawField] of Object.entries(raw)) {
+        const match = azureKey.match(/AOP(\d{1,2})$/i);
+        if (!match) continue;
+        const num = parseInt(match[1]!, 10);
+        if (!Number.isFinite(num) || num < 1 || num > 59) continue;
+        const key = `aop_${num}`;
+        const f = rawField as any;
+        let value: string | number | null = null;
+        if (typeof f?.valueNumber === "number") value = f.valueNumber;
+        else if (typeof f?.valueInteger === "number") value = f.valueInteger;
+        else if (typeof f?.valueString === "string") value = f.valueString.trim();
+        if (value === null || value === "") continue;
+        const strVal = String(value);
+        const confidence = typeof f?.confidence === "number" ? (f.confidence as number) : undefined;
+        // Always preserve zero – we want 0, not "—".
+        if (strVal.trim() !== "" || value === 0) {
+          base.fields[key] = {
+            value: strVal.trim() === "" ? "0" : strVal,
+            confidence: confidence ?? base.fields[key]?.confidence,
+          };
+        }
+      }
+    }
+  }
+
+  // Ensure document_type is always set for non-invoice flows so that
+  // the Review (Преглед) page and Excel profile filtering can pick
+  // the correct document-type schema (Даночен биланс, ДДВ, Плати).
+  const docTypeField = base.fields.document_type;
+  const hasDocType = typeof docTypeField?.value === "string" && docTypeField.value.trim().length > 0;
+  if (!hasDocType && documentType) {
+    let friendly: string | null = null;
+    if (documentType === "smetka") friendly = "Даночен биланс";
+    else if (documentType === "generic") friendly = "ДДВ";
+    else if (documentType === "plata") friendly = "Плата";
+
+    if (friendly) {
+      base.fields.document_type = {
+        value: friendly,
+      };
+    }
+  }
+
+  return base;
 }
 
 export async function batchScanInvoices(pdfPaths: string[], documentType?: string): Promise<import("@/shared/types").BatchScanResult> {
@@ -49,6 +178,48 @@ export async function exportInvoicesToNewExcel(
     invoices,
     path: path ?? null,
     worksheetName: worksheetName ?? null,
+  });
+}
+
+export async function exportToNewExcelWithColumns(
+  path: string,
+  worksheetName: string,
+  headers: string[],
+  columnFieldKeys: string[],
+  invoices: InvoiceData[]
+): Promise<string> {
+  return invoke<string>("export_to_new_excel_with_columns", {
+    path,
+    worksheetName,
+    headers,
+    columnFieldKeys,
+    invoices,
+  });
+}
+
+/** Copy the profile's template to dest_path and append invoice rows. Preserves template layout (merged headers, styling). */
+export async function copyTemplateAndAppendRows(
+  profileId: number,
+  destPath: string,
+  invoices: InvoiceData[]
+): Promise<string> {
+  return invoke<string>("copy_template_and_append_rows", {
+    profileId,
+    destPath,
+    invoices,
+  });
+}
+
+/** Copy Даночен биланс template and fill column D at fixed rows (form layout). Single document. */
+export async function copyTemplateAndFillTaxBalance(
+  profileId: number,
+  destPath: string,
+  invoice: InvoiceData
+): Promise<string> {
+  return invoke<string>("copy_template_and_fill_tax_balance", {
+    profileId,
+    destPath,
+    invoice,
   });
 }
 
@@ -172,7 +343,7 @@ export async function getHistoryById(
 export async function addHistoryRecord(payload: {
   document_type: string;
   file_path_or_name: string;
-  extracted_data: Record<string, string>;
+  extracted_data: Record<string, unknown>;
   status: string;
   excel_profile_id?: number | null;
   error_message?: string | null;
@@ -194,7 +365,7 @@ export async function updateHistoryRecord(payload: {
   id: number;
   document_type: string;
   file_path_or_name: string;
-  extracted_data: Record<string, string>;
+  extracted_data: Record<string, unknown>;
   status: string;
   excel_profile_id?: number | null;
   error_message?: string | null;

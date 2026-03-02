@@ -1,7 +1,11 @@
 use calamine::{open_workbook_auto, DataType, Reader};
 use edit_xlsx::{FormatAlignType, WorkSheetRow, Write};
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::Reader as XmlReader;
+use quick_xml::Writer;
 use regex::Regex;
-use std::io::{Read, Write as IoWrite};
+use std::collections::HashMap;
+use std::io::{Cursor, Read, Write as IoWrite};
 use std::path::Path;
 use zip::read::ZipArchive;
 use zip::write::SimpleFileOptions;
@@ -125,6 +129,42 @@ pub fn get_sheet_names(path: &str) -> Result<Vec<String>, String> {
     }
     let workbook = open_workbook_auto(path).map_err(|e| e.to_string())?;
     Ok(workbook.sheet_names().to_vec())
+}
+
+/// Dump Excel structure to JSON (sheet names + first N rows per sheet, cell-by-cell).
+/// Use this to inspect real layout (merged cells show as one cell with content, rest empty).
+pub fn dump_excel_structure(path: &str, max_rows: usize) -> Result<String, String> {
+    let path = Path::new(path);
+    if !path.exists() {
+        return Err("File not found.".to_string());
+    }
+    let mut workbook = open_workbook_auto(path).map_err(|e| format!("Open failed: {}", e))?;
+    let sheet_names = workbook.sheet_names().to_vec();
+    let mut sheets = serde_json::Map::new();
+    for name in &sheet_names {
+        let range = workbook
+            .worksheet_range(name)
+            .map_err(|e| format!("Sheet '{}': {}", name, e))?;
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        for (row_idx, row) in range.rows().enumerate() {
+            if row_idx >= max_rows {
+                break;
+            }
+            let cells: Vec<String> = row
+                .iter()
+                .map(|c| c.as_string().map(String::from).unwrap_or_else(|| format!("{:?}", c)))
+                .collect();
+            rows.push(cells);
+        }
+        let arr: serde_json::Value = serde_json::to_value(rows).map_err(|e| e.to_string())?;
+        sheets.insert(name.clone(), arr);
+    }
+    let out = serde_json::json!({
+        "path": path.to_string_lossy(),
+        "sheet_names": sheet_names,
+        "sheets": sheets,
+    });
+    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())
 }
 
 /// Find the last 1-based row index that contains any data in the sheet, scanning from header_row downward.
@@ -395,6 +435,212 @@ pub fn append_row_to_excel_at_row(
     Ok(())
 }
 
+/// Write a single cell in an existing Excel file (e.g. template form: write value to row 10, column D).
+pub fn write_excel_cell(
+    path: &str,
+    sheet_name: &str,
+    row_1based: u32,
+    col_letter: &str,
+    value: &str,
+) -> Result<(), String> {
+    write_excel_cells(path, sheet_name, &[(row_1based, col_letter, value)])
+}
+
+/// Escape text for use inside XML element content (e.g. <t>value</t>).
+fn escape_xml_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Patch worksheet XML: replace cell values for given cell refs (e.g. D10, D11) with new values.
+/// Only the first worksheet file (sheet1.xml) is patched; styles.xml and all other parts are untouched.
+fn patch_worksheet_cell_values(xml: &[u8], cell_values: &HashMap<String, String>) -> Result<Vec<u8>, String> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let is_cell = e.name().as_ref() == b"c";
+                let mut cell_ref: Option<String> = None;
+                if is_cell {
+                    for attr in e.attributes() {
+                        let attr = attr.map_err(|e| e.to_string())?;
+                        if attr.key.as_ref() == b"r" {
+                            cell_ref = Some(std::str::from_utf8(&attr.value).map_err(|e| e.to_string())?.to_string());
+                            break;
+                        }
+                    }
+                }
+                if is_cell && cell_ref.as_ref().map_or(false, |r| cell_values.contains_key(r)) {
+                    let r = cell_ref.as_ref().unwrap();
+                    let value = cell_values.get(r).unwrap();
+                    let escaped = escape_xml_text(&sanitize_cell(value));
+                    let mut c_start = BytesStart::new("c");
+                    c_start.push_attribute(("r", r.as_str()));
+                    c_start.push_attribute(("t", "inlineStr"));
+                    writer.write_event(Event::Start(c_start)).map_err(|e| e.to_string())?;
+                    writer.write_event(Event::Start(BytesStart::new("is"))).map_err(|e| e.to_string())?;
+                    writer.write_event(Event::Start(BytesStart::new("t"))).map_err(|e| e.to_string())?;
+                    writer.write_event(Event::Text(BytesText::from_escaped(escaped.as_str()))).map_err(|e| e.to_string())?;
+                    writer.write_event(Event::End(BytesEnd::new("t"))).map_err(|e| e.to_string())?;
+                    writer.write_event(Event::End(BytesEnd::new("is"))).map_err(|e| e.to_string())?;
+                    writer.write_event(Event::End(BytesEnd::new("c"))).map_err(|e| e.to_string())?;
+                    buf.clear();
+                    loop {
+                        match reader.read_event_into(&mut buf) {
+                            Ok(Event::End(ee)) if ee.name().as_ref() == b"c" => {
+                                buf.clear();
+                                break;
+                            }
+                            Ok(Event::Eof) => break,
+                            Ok(_) => { buf.clear(); }
+                                    Err(er) => return Err(er.to_string()),
+                                }
+                            }
+                } else {
+                    writer.write_event(Event::Start(e)).map_err(|e| e.to_string())?;
+                    if is_cell {
+                        loop {
+                            match reader.read_event_into(&mut buf) {
+                                Ok(Event::End(ee)) if ee.name().as_ref() == b"c" => {
+                                    writer.write_event(Event::End(ee)).map_err(|e| e.to_string())?;
+                                    buf.clear();
+                                    break;
+                                }
+                                Ok(Event::Eof) => break,
+                                Ok(ev) => {
+                                    writer.write_event(ev).map_err(|e| e.to_string())?;
+                                    buf.clear();
+                                }
+                                Err(er) => return Err(er.to_string()),
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(ev) => writer.write_event(ev).map_err(|e| e.to_string())?,
+            Err(er) => return Err(er.to_string()),
+        }
+        buf.clear();
+    }
+    Ok(writer.into_inner().into_inner())
+}
+
+/// Remove the <definedNames>...</definedNames> block from workbook.xml so Excel does not
+/// report "Removed Records: Named range" when opening (template often has names pointing to missing sheets).
+fn strip_defined_names_from_workbook(xml: &[u8]) -> Vec<u8> {
+    let s = match std::str::from_utf8(xml) {
+        Ok(s) => s,
+        Err(_) => return xml.to_vec(),
+    };
+    let open_tag = "<definedNames>";
+    let close_tag = "</definedNames>";
+    let Some(start) = s.find(open_tag) else {
+        return xml.to_vec();
+    };
+    let rest = &s[start..];
+    let Some(close_pos) = rest.find(close_tag) else {
+        return xml.to_vec();
+    };
+    let end = start + close_pos + close_tag.len();
+    let mut out = String::with_capacity(s.len());
+    out.push_str(&s[..start]);
+    out.push_str(&s[end..]);
+    out.into_bytes()
+}
+
+/// Fill tax balance cells by patching only the worksheet XML inside the xlsx zip.
+/// Also strips definedNames from workbook.xml so Excel does not report "Removed Records: Named range".
+/// Does not use edit-xlsx, so styles.xml is never re-serialized — avoids "unreadable content" errors.
+pub fn fill_tax_balance_cells_via_zip(
+    path: &Path,
+    updates: &[(u32, &str, &str)],
+) -> Result<(), String> {
+    use std::fs::File;
+
+    let cell_values: HashMap<String, String> = updates
+        .iter()
+        .map(|(row, col, val)| (format!("{}{}", col.to_uppercase(), row), sanitize_cell(val)))
+        .collect();
+    if cell_values.is_empty() {
+        return Ok(());
+    }
+
+    let file = File::open(path).map_err(|e| format!("Open: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid zip: {}", e))?;
+
+    let temp_path = path.with_extension("tmp.xlsx");
+    let out_file = File::create(&temp_path).map_err(|e| format!("Create temp: {}", e))?;
+    let mut zip_writer = ZipWriter::new(out_file);
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    let worksheet_name = "xl/worksheets/sheet1.xml";
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("Entry {}: {}", i, e))?;
+        let name = entry.name().replace('\\', "/");
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data).map_err(|e| format!("Read {}: {}", name, e))?;
+
+        if name == worksheet_name {
+            let patched = patch_worksheet_cell_values(&data, &cell_values)?;
+            zip_writer.start_file(&name, opts).map_err(|e| e.to_string())?;
+            zip_writer.write_all(&patched).map_err(|e| e.to_string())?;
+        } else if name == "xl/workbook.xml" {
+            let patched = strip_defined_names_from_workbook(&data);
+            zip_writer.start_file(&name, opts).map_err(|e| e.to_string())?;
+            zip_writer.write_all(&patched).map_err(|e| e.to_string())?;
+        } else {
+            zip_writer.start_file(&name, opts).map_err(|e| e.to_string())?;
+            zip_writer.write_all(&data).map_err(|e| e.to_string())?;
+        }
+    }
+    zip_writer.finish().map_err(|e| e.to_string())?;
+    drop(archive);
+    std::fs::rename(&temp_path, path).map_err(|e| format!("Replace: {}", e))?;
+    Ok(())
+}
+
+/// Write multiple cells in one open/save cycle so the template layout (merges, formatting) is preserved.
+/// Uses write_string (no custom format) to avoid edit-xlsx adding style entries that can corrupt
+/// styles.xml and cause "Undeclared prefix" / "unreadable content" when Excel opens the file.
+pub fn write_excel_cells(
+    path: &str,
+    sheet_name: &str,
+    updates: &[(u32, &str, &str)],
+) -> Result<(), String> {
+    let path = Path::new(path);
+    if !path.exists() {
+        return Err("File not found.".to_string());
+    }
+    let mut workbook = edit_xlsx::Workbook::from_path(path).map_err(|e| e.to_string())?;
+    let worksheet = workbook
+        .get_worksheet_mut_by_name(sheet_name)
+        .map_err(|e| format!("Sheet not found: {}", e))?;
+    for (row_1based, col_letter, value) in updates {
+        let cell_ref = format!("{}{}", col_letter.to_uppercase(), row_1based);
+        let safe_value = sanitize_cell(value);
+        worksheet
+            .write_string(&cell_ref, safe_value)
+            .map_err(|e| e.to_string())?;
+    }
+    workbook.save_as(path).map_err(|e| e.to_string())?;
+    strip_drawings_from_xlsx(path).map_err(|e| format!("Could not strip drawings: {}", e))?;
+    Ok(())
+}
+
 /// Column keys for batch export (order matches header row). First column = document type (Тип на документ).
 const EXPORT_FIELDS: &[&str] = &[
     "document_type",
@@ -443,6 +689,28 @@ fn write_text_cell_safe(
 }
 
 /// Write number cell: parse as f64 and write number, or write sanitized text on parse failure.
+/// Normalize amount string to parseable form: dot (.) as decimal, no thousands separators.
+/// Handles European "27.826,17" (dot thousands, comma decimal) and US "27,826.17" (comma thousands, dot decimal).
+fn normalize_amount_string(value: &str) -> String {
+    let s = value.trim().replace(' ', "");
+    if s.is_empty() {
+        return s;
+    }
+    let last_comma = s.rfind(',');
+    let last_dot = s.rfind('.');
+    // European: comma is decimal (e.g. "27.826,17" -> last separator is comma)
+    let european = match (last_comma, last_dot) {
+        (Some(c), Some(d)) => c > d,
+        (Some(_), None) => true,
+        (None, _) => false,
+    };
+    if european {
+        s.replace('.', "").replace(',', ".")
+    } else {
+        s.replace(',', "")
+    }
+}
+
 fn write_number_cell_safe(
     worksheet: &mut Worksheet,
     row: u32,
@@ -451,7 +719,7 @@ fn write_number_cell_safe(
     number_format: &Format,
     text_format: &Format,
 ) -> Result<(), XlsxError> {
-    let cleaned = value.replace(',', "").replace(' ', "").trim().to_string();
+    let cleaned = normalize_amount_string(value);
     match cleaned.parse::<f64>() {
         Ok(num) => worksheet.write_number_with_format(row, col, num, number_format).map(|_| ()),
         Err(_) => {
@@ -866,4 +1134,154 @@ pub fn export_invoices_to_new_excel(
     let _ = worksheet.set_freeze_panes(1, 0);
     workbook.save(&path).map_err(|e: XlsxError| e.to_string())?;
     Ok(path_str)
+}
+
+/// Field keys that should be written as numbers in Excel (invoice + analyzer amount fields).
+fn is_amount_field(key: &str) -> bool {
+    matches!(
+        key,
+        "net_amount"
+            | "tax_amount"
+            | "total_amount"
+            | "financialResultFromPL"
+            | "nonRecognizedExpensesTotal"
+            | "taxBaseBeforeReduction"
+            | "taxBaseReductionTotal"
+            | "taxBaseAfterReduction"
+            | "calculatedProfitTax"
+            | "calculatedTaxReductionTotal"
+            | "calculatedTaxAfterReduction"
+            | "advanceTaxPaid"
+            | "overpaidCarriedForward"
+            | "amountToPayOrOverpaid"
+            | "totalTaxBase"
+            | "totalOutputVat"
+            | "totalInputVat"
+            | "vatPayableOrRefund"
+            | "totalGrossSalary"
+            | "totalNetSalary"
+            | "totalPayrollCost"
+    )
+}
+
+/// Create a new Excel file with custom headers and column mapping (no template).
+/// Uses rust_xlsxwriter only — no edit_xlsx, so no named ranges or calc chain (avoids "unreadable content").
+/// Returns the saved file path.
+pub fn export_to_new_excel_with_columns(
+    path: &str,
+    worksheet_name: &str,
+    headers: &[String],
+    column_field_keys: &[String],
+    invoices: &[InvoiceData],
+) -> Result<String, String> {
+    if headers.len() != column_field_keys.len() {
+        return Err("headers and column_field_keys must have the same length".to_string());
+    }
+    let path_buf = std::path::PathBuf::from(path);
+    let path_str = path_buf
+        .to_str()
+        .ok_or("Invalid path")?
+        .to_string();
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet
+        .set_name(worksheet_name)
+        .map_err(|e: XlsxError| e.to_string())?;
+
+    let header_format = Format::new()
+        .set_bold()
+        .set_background_color(rust_xlsxwriter::Color::RGB(0x2563EB))
+        .set_font_color(rust_xlsxwriter::Color::RGB(0xFFFFFF));
+    let text_format_wrap = Format::new().set_text_wrap();
+    let amount_format_wrap = Format::new()
+        .set_num_format("#,##0.00")
+        .set_align(FormatAlign::Right)
+        .set_text_wrap();
+
+    const COL_WIDTH: f64 = 18.0;
+    for col in 0..headers.len() {
+        let _ = worksheet.set_column_width(col as u16, COL_WIDTH);
+    }
+
+    for (col, header) in headers.iter().enumerate() {
+        write_text_cell_safe(worksheet, 0, col as u16, header, &header_format)
+            .map_err(|e: XlsxError| e.to_string())?;
+    }
+
+    for (row_idx, inv) in invoices.iter().enumerate() {
+        let row = (row_idx + 1) as u32;
+        for (col_idx, field_key) in column_field_keys.iter().enumerate() {
+            let value = inv
+                .fields
+                .get(field_key)
+                .map(|f| f.value.as_str())
+                .unwrap_or("");
+            if is_amount_field(field_key) {
+                write_number_cell_safe(
+                    worksheet,
+                    row,
+                    col_idx as u16,
+                    value,
+                    &amount_format_wrap,
+                    &text_format_wrap,
+                )
+                .map_err(|e: XlsxError| e.to_string())?;
+            } else {
+                write_text_cell_safe(worksheet, row, col_idx as u16, value, &text_format_wrap)
+                    .map_err(|e: XlsxError| e.to_string())?;
+            }
+        }
+    }
+
+    let _ = worksheet.set_freeze_panes(1, 0);
+    workbook.save(&path_buf).map_err(|e: XlsxError| e.to_string())?;
+    Ok(path_str)
+}
+
+/// Create a minimal DDV (VAT return) Excel template (.xlsx) for export.
+/// The legacy provided template is .XLS, which cannot be appended to with edit_xlsx.
+pub fn create_ddv_template_xlsx(path: &str) -> Result<(), String> {
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet
+        .set_name("ДДВ")
+        .map_err(|e: XlsxError| e.to_string())?;
+
+    let header_format = Format::new()
+        .set_bold()
+        .set_background_color(rust_xlsxwriter::Color::RGB(0x2563EB))
+        .set_font_color(rust_xlsxwriter::Color::RGB(0xFFFFFF));
+    let text_format_wrap = Format::new().set_text_wrap();
+
+    // Reasonable defaults for readability
+    let widths: [f64; 8] = [18.0, 28.0, 16.0, 22.0, 20.0, 20.0, 24.0, 40.0];
+    for (col, w) in widths.iter().enumerate() {
+        let _ = worksheet.set_column_width(col as u16, *w);
+    }
+
+    let headers: [&str; 8] = [
+        "Даночен период",
+        "Назив на компанија",
+        "ЕДБ",
+        "Вкупна даночна основа",
+        "Вкупен излезен ДДВ",
+        "Вкупен влезен ДДВ",
+        "ДДВ за плаќање / поврат",
+        "Опис",
+    ];
+    for (col, header) in headers.iter().enumerate() {
+        write_text_cell_safe(worksheet, 0, col as u16, header, &header_format)
+            .map_err(|e: XlsxError| e.to_string())?;
+    }
+
+    // Keep a blank first data row with wrap enabled, so appended rows look consistent.
+    for col in 0..headers.len() {
+        let _ = worksheet.write_string_with_format(1, col as u16, "", &text_format_wrap);
+    }
+
+    workbook
+        .save(path)
+        .map_err(|e: XlsxError| e.to_string())?;
+    Ok(())
 }

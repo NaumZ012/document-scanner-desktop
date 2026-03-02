@@ -1,7 +1,7 @@
 mod cache;
 mod commands;
 mod db;
-mod excel;
+pub mod excel;
 mod models;
 mod ocr;
 mod services;
@@ -41,6 +41,9 @@ pub fn run() {
             commands::batch_scan_invoices,
             commands::export_invoices_to_excel,
             commands::export_invoices_to_new_excel,
+            commands::export_to_new_excel_with_columns,
+            commands::copy_template_and_append_rows,
+            commands::copy_template_and_fill_tax_balance,
             commands::append_invoices_to_existing_excel,
             commands::validate_document_file,
             commands::validate_excel_file,

@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "kill-app": "node scripts/kill-app.js",
-    "tauri:dev": "npm run kill-app && tauri dev"
+    "tauri:dev": "npm run kill-app && tauri dev",
+    "excel:dump": "cd src-tauri && cargo run --bin dump_excel -- --all"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

@@ -1,0 +1,180 @@
+{
+  "name": "MacedonianVATAnalyzer",
+  "description": "Schema to extract data from the Macedonian DDV-04 VAT return PDF. The descriptive field names map to specific boxes on the form, corresponding to columns in the acc.# 230 (Output Tax) and acc.# 130 (Input Tax) Excel sheets.",
+  "fieldSchema": {
+    "fields": {
+      "companyName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Full legal name of the taxpayer company. Look for 'Скратен назив'."
+      },
+      "companyTaxId": {
+        "type": "string",
+        "method": "extract",
+        "description": "The 13-digit Tax identification number (Даночен идентификациски број)."
+      },
+      "taxPeriodStart": {
+        "type": "string",
+        "method": "extract",
+        "description": "Start date of the VAT period. Look for 'Даночен период од'."
+      },
+      "taxPeriodEnd": {
+        "type": "string",
+        "method": "extract",
+        "description": "End date of the VAT period. Look for 'до' next to the start date."
+      },
+
+      "prometOpshtaStapkaOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 01: 'Оданочив промет по општа даночна стапка' (Base). Maps to acc.# 230 Column 1.0."
+      },
+      "prometOpshtaStapkaDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 02: 'Оданочив промет по општа даночна стапка' (VAT). Maps to acc.# 230 Column 2.0."
+      },
+      "prometPovlastenaStapka10Osnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 03: 'Оданочив промет по повластена даночна стапка од 10%' (Base). Maps to acc.# 230 Column 3.0."
+      },
+      "prometPovlastenaStapka10DDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 04: 'Оданочив промет по повластена даночна стапка од 10%' (VAT). Maps to acc.# 230 Column 4.0."
+      },
+      "prometPovlastenaStapka5Osnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 05: 'Оданочив промет по повластена стапка од 5%' (Base). Maps to acc.# 230 Column 5.0."
+      },
+      "prometPovlastenaStapka5DDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 06: 'Оданочив промет по повластена стапка од 5%' (VAT). Maps to acc.# 230 Column 6.0."
+      },
+      "izvoz": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 07: 'Извоз'. Maps to acc.# 230 Column 7.0."
+      },
+      "oslobodenSOPravoNaOdbivka": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 08: 'Промет ослободен од данок со право на одбивка на претходен данок'. Maps to acc.# 230 Column 8.0."
+      },
+      "oslobodenBezPravoNaOdbivka": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 09: 'Промет ослободен од данок без право на одбивка на претходен данок'. Maps to acc.# 230 Column 9.0."
+      },
+      "prometNerezidentiNeOdanocliv": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 10: 'Промет извршен спрема даночни обврзници кои немаат седиште во земјата, кој не е предмет на оданочување во земјата'. Maps to acc.# 230 Column 10.0."
+      },
+      "prometPrenesuvanjeDanocnaObvrska": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 11: 'Промет во земјата за кој данокот го пресметува примателот на прометот (пренесување на даночна обврска согласно член 32-а)'. Maps to acc.# 230 Column 11.0."
+      },
+      "primenPrometNerezidentiOpshtaOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 12: 'Примен промет извршен од страна на даночни обврзници кои немаат седиште во земјата по општа даночна стапка' (Base). Maps to acc.# 230 Column 12.0."
+      },
+      "primenPrometNerezidentiOpshtaDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 13: 'Примен промет извршен од страна на даночни обврзници кои немаат седиште во земјата по општа даночна стапка' (VAT). Maps to acc.# 230 Column 13.0."
+      },
+      "primenPrometNerezidentiPovlastenaOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 14: 'Примен промет извршен од страна на даночни обврзници кои немаат седиште во земјата по повластена даночна стапка' (Base). Maps to acc.# 230 Column 14.0."
+      },
+      "primenPrometNerezidentiPovlastenaDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 15: 'Примен промет извршен од страна на даночни обврзници кои немаат седиште во земјата по повластена даночна стапка' (VAT). Maps to acc.# 230 Column 15.0."
+      },
+      "primenPrometZemjaOpshtaOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 16: 'Примен промет во земјата за кој данокот го пресметува примателот на прометот по општа даночна стапка' (Base). Maps to acc.# 230 Column 16.0."
+      },
+      "primenPrometZemjaOpshtaDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 17: 'Примен промет во земјата за кој данокот го пресметува примателот на прометот по општа даночна стапка' (VAT). Maps to acc.# 230 Column 17.0."
+      },
+      "primenPrometZemjaPovlastenaOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 18: 'Примен промет во земјата за кој данокот го пресметува примателот на прометот по повластена даночна стапка' (Base). Maps to acc.# 230 Column 18.0."
+      },
+      "primenPrometZemjaPovlastenaDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 19: 'Примен промет во земјата за кој данокот го пресметува примателот на прометот по повластена даночна стапка' (VAT). Maps to acc.# 230 Column 19.0."
+      },
+
+      "vlezenPrometOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 21: 'Влезен промет' (Base). Maps to acc.# 130 Column 21.0."
+      },
+      "vlezenPrometDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 22: 'Влезен промет' (VAT). Maps to acc.# 130 Column 22.0."
+      },
+      "vlezenPrometPrijamatelStranstvoOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 23: 'Влезен промет за кој данокот го пресметува примателот на прометот' (Base). Maps to acc.# 130 Column 23.0."
+      },
+      "vlezenPrometPrijamatelStranstvoDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 24: 'Влезен промет за кој данокот го пресметува примателот на прометот' (VAT). Maps to acc.# 130 Column 24.0."
+      },
+      "vlezenPrometPrijamatelZemjaOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 25: 'Влезен промет во земјата за кој данокот го пресметува примателот на прометот' (Base). Maps to acc.# 130 Column 25.0."
+      },
+      "vlezenPrometPrijamatelZemjaDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 26: 'Влезен промет во земјата за кој данокот го пресметува примателот на прометот' (VAT). Maps to acc.# 130 Column 26.0."
+      },
+      "uvozOsnova": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 27: 'Увоз' (Base). Maps to acc.# 130 Column 27.0."
+      },
+      "uvozDDV": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 28: 'Увоз' (VAT). Maps to acc.# 130 Column 28.0."
+      },
+      "prethodniDanociZaOdbivanje": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 29: 'Претходни даноци за одбивање'. Maps to acc.# 130 Column 29.0."
+      },
+      "ostanatiDanociIznosiZaOdbivanje": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 30: 'Останати даноци, претх даноци и износи за одбивање'. Maps to acc.# 130 Column 30.0."
+      },
+      "danochenDolgIliPobaruvanje": {
+        "type": "number",
+        "method": "extract",
+        "description": "Box 31: 'Даночен долг / побарување'. The final tax liability or claim amount. Maps to acc.# 130 Column 31.0."
+      }
+    }
+  }
+}

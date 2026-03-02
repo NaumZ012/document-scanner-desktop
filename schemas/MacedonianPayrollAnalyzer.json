@@ -1,0 +1,65 @@
+{
+  "name": "MacedonianSalaryDeclarationAnalyzer",
+  "description": "Schema to extract data from the UJP MPIN declaration (Декларација за прием на плати). The fields directly map to the 'РД-Трошоци за вработени' Excel rows, where the declaration period dictates the target column (month).",
+  "fieldSchema": {
+    "fields": {
+      "companyName": {
+        "type": "string",
+        "method": "extract",
+        "description": "The legal name of the company. Look for 'Име на обврзникот'."
+      },
+      "companyTaxId": {
+        "type": "string",
+        "method": "extract",
+        "description": "The 13-digit Tax ID. Look for 'Идентификација на обврзникот'."
+      },
+      "declarationPeriod": {
+        "type": "string",
+        "method": "extract",
+        "description": "The month and year of the salary declaration (e.g., '02/2024'). Look for 'Период за кој се поднесува и плаќа придонесот'. Crucial for routing data to the correct Excel column."
+      },
+      "brojVraboteni": {
+        "type": "number",
+        "method": "extract",
+        "description": "Total number of insured employees. Look for 'Вкупно осигуреници' at the bottom of the page."
+      },
+      
+      "brutoPlata": {
+        "type": "number",
+        "method": "extract",
+        "description": "Row 1: 'Бруто плата (Бруто 2)'. Extract the value from the 'Бруто основица' row. Usually, this is identical across all contribution columns (e.g., 408,542.00)."
+      },
+      "pridonesPIO": {
+        "type": "number",
+        "method": "extract",
+        "description": "Row 2: 'Придонес за ПИО' (18.8%). Extract from the 'Вкупен износ на придонесот' row, under the 'Задолжителен Придонес за ПИО' column."
+      },
+      "pridonesZdravstvo": {
+        "type": "number",
+        "method": "extract",
+        "description": "Row 3: 'Придонес за здравство' (7.5%). Extract from the 'Вкупен износ на придонесот' row, under the 'Задолжителен Придонес за Здравство' column."
+      },
+      "pridonesProfesionalnoZaboluvanje": {
+        "type": "number",
+        "method": "extract",
+        "description": "Row 4: 'Придонес за профес. здравствено осигурување' (0.5%). Extract from the 'Вкупен износ на придонесот' row, under the 'Професионален дополнителен придонес' column."
+      },
+      "pridonesVrabotuvanje": {
+        "type": "number",
+        "method": "extract",
+        "description": "Row 5: 'Придонес за вработување' (1.2%). Extract from the 'Вкупен износ на придонесот' row, under the 'Придонес за вработување во случај на невработеност' column."
+      },
+      
+      "personalenDanok": {
+        "type": "number",
+        "method": "extract",
+        "description": "Personal Income Tax. Extract from the 'Вкупен износ на придонесот' row, under the 'Персонален Данок од плата' column. (Extracted for completeness in case it is needed further down in the Excel sheet)."
+      },
+      "vkupnaNetoPlata": {
+        "type": "number",
+        "method": "extract",
+        "description": "Total net salary paid to employees. Look for 'Вкупна нето ефективна плата' at the bottom of the page."
+      }
+    }
+  }
+}

@@ -55,6 +55,8 @@ export const FIELD_GROUPS = {
   buyer: ["buyer_name", "buyer_address", "buyer_tax_id"] as const,
   amounts: ["description", "net_amount", "tax_amount", "total_amount", "currency"] as const,
   other: ["due_date", "payment_method"] as const,
+  /** Keys not in any group above (e.g. tax/smetka analyzer fields) are shown in this group. */
+  extracted: [] as const,
 } as const;
 
 export const GROUP_LABELS: Record<keyof typeof FIELD_GROUPS, string> = {
@@ -63,6 +65,7 @@ export const GROUP_LABELS: Record<keyof typeof FIELD_GROUPS, string> = {
   buyer: "Buyer",
   amounts: "Amounts",
   other: "Other",
+  extracted: "Extracted",
 };
 
 export const GROUP_LABELS_MK: Record<keyof typeof FIELD_GROUPS, string> = {
@@ -71,6 +74,7 @@ export const GROUP_LABELS_MK: Record<keyof typeof FIELD_GROUPS, string> = {
   buyer: "Купувач",
   amounts: "Износи",
   other: "Друго",
+  extracted: "Извлечени податоци",
 };
 
 /** Input type hint for each field (for better UX). */
@@ -81,6 +85,144 @@ export const FIELD_INPUT_TYPE: Partial<Record<FieldKey, "text" | "date" | "amoun
   tax_amount: "amount",
   total_amount: "amount",
 };
+
+/** Input type for analyzer/camelCase fields (Даночен биланс, ДДВ, Плати). */
+export const ANALYZER_FIELD_INPUT_TYPE: Record<string, "text" | "date" | "amount"> = {
+  taxYear: "text",
+  year: "text",
+  taxPeriod: "text",
+  taxPeriodStart: "text",
+  taxPeriodEnd: "text",
+  // Даночен биланс (FullTaxBalanceAnalyzer) summary fields
+  financialResultFromPL: "amount",
+  nonRecognizedExpensesTotal: "amount",
+  taxBaseBeforeReduction: "amount",
+  taxBaseReductionTotal: "amount",
+  taxBaseAfterReduction: "amount",
+  calculatedProfitTax: "amount",
+  calculatedTaxReductionTotal: "amount",
+  calculatedTaxAfterReduction: "amount",
+  advanceTaxPaid: "amount",
+  overpaidCarriedForward: "amount",
+  amountToPayOrOverpaid: "amount",
+  // ДДВ (MacedonianVatReturnAnalyzer) – all numeric boxes are amounts
+  totalTaxBase: "amount",
+  totalOutputVat: "amount",
+  totalInputVat: "amount",
+  vatPayableOrRefund: "amount",
+  prometOpshtaStapkaOsnova: "amount",
+  prometOpshtaStapkaDDV: "amount",
+  prometPovlastenaStapka10Osnova: "amount",
+  prometPovlastenaStapka10DDV: "amount",
+  prometPovlastenaStapka5Osnova: "amount",
+  prometPovlastenaStapka5DDV: "amount",
+  izvoz: "amount",
+  oslobodenSOPravoNaOdbivka: "amount",
+  oslobodenBezPravoNaOdbivka: "amount",
+  prometNerezidentiNeOdanocliv: "amount",
+  prometPrenesuvanjeDanocnaObvrska: "amount",
+  primenPrometNerezidentiOpshtaOsnova: "amount",
+  primenPrometNerezidentiOpshtaDDV: "amount",
+  primenPrometNerezidentiPovlastenaOsnova: "amount",
+  primenPrometNerezidentiPovlastenaDDV: "amount",
+  primenPrometZemjaOpshtaOsnova: "amount",
+  primenPrometZemjaOpshtaDDV: "amount",
+  primenPrometZemjaPovlastenaOsnova: "amount",
+  primenPrometZemjaPovlastenaDDV: "amount",
+  vlezenPrometOsnova: "amount",
+  vlezenPrometDDV: "amount",
+  vlezenPrometPrijamatelStranstvoOsnova: "amount",
+  vlezenPrometPrijamatelStranstvoDDV: "amount",
+  vlezenPrometPrijamatelZemjaOsnova: "amount",
+  vlezenPrometPrijamatelZemjaDDV: "amount",
+  uvozOsnova: "amount",
+  uvozDDV: "amount",
+  prethodniDanociZaOdbivanje: "amount",
+  ostanatiDanociIznosiZaOdbivanje: "amount",
+  danochenDolgIliPobaruvanje: "amount",
+  // Плати (MacedonianPayrollAnalyzer)
+  brutoPlata: "amount",
+  pridonesPIO: "amount",
+  pridonesZdravstvo: "amount",
+  pridonesProfesionalnoZaboluvanje: "amount",
+  pridonesVrabotuvanje: "amount",
+  personalenDanok: "amount",
+  vkupnaNetoPlata: "amount",
+  // Legacy payroll summary keys (still supported)
+  totalTaxBase: "amount",
+  totalOutputVat: "amount",
+  totalInputVat: "amount",
+  vatPayableOrRefund: "amount",
+  totalGrossSalary: "amount",
+  totalNetSalary: "amount",
+  totalPayrollCost: "amount",
+  ...Object.fromEntries(Array.from({ length: 59 }, (_, i) => [`aop_${i + 1}`, "amount" as const])),
+};
+
+/** All field keys that should be written as numbers in Excel (invoice + analyzer). Used for dynamic export. */
+export const ALL_AMOUNT_KEYS = new Set<string>([
+  "net_amount",
+  "tax_amount",
+  "total_amount",
+  // Даночен биланс summary + AOP lines
+  "financialResultFromPL",
+  "nonRecognizedExpensesTotal",
+  "taxBaseBeforeReduction",
+  "taxBaseReductionTotal",
+  "taxBaseAfterReduction",
+  "calculatedProfitTax",
+  "calculatedTaxReductionTotal",
+  "calculatedTaxAfterReduction",
+  "advanceTaxPaid",
+  "overpaidCarriedForward",
+  "amountToPayOrOverpaid",
+  // ДДВ analyzer summary + all box amounts
+  "totalTaxBase",
+  "totalOutputVat",
+  "totalInputVat",
+  "vatPayableOrRefund",
+  "prometOpshtaStapkaOsnova",
+  "prometOpshtaStapkaDDV",
+  "prometPovlastenaStapka10Osnova",
+  "prometPovlastenaStapka10DDV",
+  "prometPovlastenaStapka5Osnova",
+  "prometPovlastenaStapka5DDV",
+  "izvoz",
+  "oslobodenSOPravoNaOdbivka",
+  "oslobodenBezPravoNaOdbivka",
+  "prometNerezidentiNeOdanocliv",
+  "prometPrenesuvanjeDanocnaObvrska",
+  "primenPrometNerezidentiOpshtaOsnova",
+  "primenPrometNerezidentiOpshtaDDV",
+  "primenPrometNerezidentiPovlastenaOsnova",
+  "primenPrometNerezidentiPovlastenaDDV",
+  "primenPrometZemjaOpshtaOsnova",
+  "primenPrometZemjaOpshtaDDV",
+  "primenPrometZemjaPovlastenaOsnova",
+  "primenPrometZemjaPovlastenaDDV",
+  "vlezenPrometOsnova",
+  "vlezenPrometDDV",
+  "vlezenPrometPrijamatelStranstvoOsnova",
+  "vlezenPrometPrijamatelStranstvoDDV",
+  "vlezenPrometPrijamatelZemjaOsnova",
+  "vlezenPrometPrijamatelZemjaDDV",
+  "uvozOsnova",
+  "uvozDDV",
+  "prethodniDanociZaOdbivanje",
+  "ostanatiDanociIznosiZaOdbivanje",
+  "danochenDolgIliPobaruvanje",
+  // Плати analyzer (new + legacy)
+  "brutoPlata",
+  "pridonesPIO",
+  "pridonesZdravstvo",
+  "pridonesProfesionalnoZaboluvanje",
+  "pridonesVrabotuvanje",
+  "personalenDanok",
+  "totalGrossSalary",
+  "totalNetSalary",
+  "totalPayrollCost",
+  ...Array.from({ length: 59 }, (_, i) => `aop_${i + 1}`),
+]);
 
 /** Fields that use textarea (multi-line) for better content fit. */
 export const FIELD_TEXTAREA: FieldKey[] = [
@@ -132,6 +274,97 @@ export const FIELD_LABELS_MK: Record<FieldKey, string> = {
   due_date: "Рок на плаќање",
   reference: "Референца",
   payment_method: "Начин на плаќање",
+};
+
+/** AOP 1–59 labels for Даночен биланс (FullTaxBalanceAnalyzer schema). */
+export const AOP_LABELS_MK: Record<string, string> = Object.fromEntries(
+  Array.from({ length: 59 }, (_, i) => [`aop_${i + 1}`, `АОП ${i + 1}`])
+);
+
+/** Labels for tax/smetka (Даночен биланс) and other analyzer fields not in FIELD_KEYS. */
+export const TAX_FIELD_LABELS_MK: Record<string, string> = {
+  companyName: "Назив на компанија",
+  companyTaxId: "ЕДБ на компанија",
+  taxPeriodStart: "Даночен период од",
+  taxPeriodEnd: "Даночен период до",
+  ...AOP_LABELS_MK,
+  // Legacy keys (kept for backward compatibility if old analyzer is used)
+  taxYear: "Даночна година",
+  financialResultFromPL: "Финансиски резултат (Биланс на успех)",
+  nonRecognizedExpensesTotal: "Непризнаени расходи (збир)",
+  taxBaseBeforeReduction: "Даночна основа (пред намалување)",
+  taxBaseReductionTotal: "Намалување на даночна основа",
+  taxBaseAfterReduction: "Даночна основа (по намалување)",
+  calculatedProfitTax: "Пресметан данок на добивка",
+  calculatedTaxReductionTotal: "Намалување на пресметан данок",
+  calculatedTaxAfterReduction: "Пресметан данок (по намалување)",
+  advanceTaxPaid: "Платени аконтации",
+  overpaidCarriedForward: "Повеќе платен пренесен",
+  amountToPayOrOverpaid: "За доплата / повеќе платено",
+};
+
+/** Labels for ДДВ (VAT return) analyzer fields. */
+export const DDV_FIELD_LABELS_MK: Record<string, string> = {
+  taxPeriod: "Даночен период",
+  companyName: "Назив на компанија",
+  companyTaxId: "ЕДБ",
+  // Summary totals (bottom line of формуларот)
+  totalTaxBase: "Вкупна даночна основа (01–19)",
+  totalOutputVat: "Вкупен излезен ДДВ",
+  totalInputVat: "Вкупен влезен ДДВ",
+  vatPayableOrRefund: "ДДВ за плаќање / побарување",
+  // Boxes 01–11 (acc.# 230 – излезен ДДВ)
+  prometOpshtaStapkaOsnova: "01 Оданочив промет по општа стапка – основа",
+  prometOpshtaStapkaDDV: "02 Оданочив промет по општа стапка – ДДВ",
+  prometPovlastenaStapka10Osnova: "03 Оданочив промет по повластена стапка 10% – основа",
+  prometPovlastenaStapka10DDV: "04 Оданочив промет по повластена стапка 10% – ДДВ",
+  prometPovlastenaStapka5Osnova: "05 Оданочив промет по повластена стапка 5% – основа",
+  prometPovlastenaStapka5DDV: "06 Оданочив промет по повластена стапка 5% – ДДВ",
+  izvoz: "07 Извоз",
+  oslobodenSOPravoNaOdbivka: "08 Промет ослободен со право на одбивка",
+  oslobodenBezPravoNaOdbivka: "09 Промет ослободен без право на одбивка",
+  prometNerezidentiNeOdanocliv: "10 Промет кон нерезиденти (неоданочлив во земјата)",
+  prometPrenesuvanjeDanocnaObvrska: "11 Промет со пренесување на даночна обврска",
+  primenPrometNerezidentiOpshtaOsnova: "12 Примен промет од нерезиденти по општа стапка – основа",
+  primenPrometNerezidentiOpshtaDDV: "13 Примен промет од нерезиденти по општа стапка – ДДВ",
+  primenPrometNerezidentiPovlastenaOsnova: "14 Примен промет од нерезиденти по повластена стапка – основа",
+  primenPrometNerezidentiPovlastenaDDV: "15 Примен промет од нерезиденти по повластена стапка – ДДВ",
+  primenPrometZemjaOpshtaOsnova: "16 Примен промет во земја по општа стапка – основа",
+  primenPrometZemjaOpshtaDDV: "17 Примен промет во земја по општа стапка – ДДВ",
+  primenPrometZemjaPovlastenaOsnova: "18 Примен промет во земја по повластена стапка – основа",
+  primenPrometZemjaPovlastenaDDV: "19 Примен промет во земја по повластена стапка – ДДВ",
+  // Boxes 21–31 (acc.# 130 – влезен ДДВ и даночен долг)
+  vlezenPrometOsnova: "21 Влезен промет – основа",
+  vlezenPrometDDV: "22 Влезен промет – ДДВ",
+  vlezenPrometPrijamatelStranstvoOsnova: "23 Влезен промет за кој данокот го пресметува примателот (странство) – основа",
+  vlezenPrometPrijamatelStranstvoDDV: "24 Влезен промет за кој данокот го пресметува примателот (странство) – ДДВ",
+  vlezenPrometPrijamatelZemjaOsnova: "25 Влезен промет за кој данокот го пресметува примателот (земја) – основа",
+  vlezenPrometPrijamatelZemjaDDV: "26 Влезен промет за кој данокот го пресметува примателот (земја) – ДДВ",
+  uvozOsnova: "27 Увоз – основа",
+  uvozDDV: "28 Увоз – ДДВ",
+  prethodniDanociZaOdbivanje: "29 Претходни даноци за одбивање",
+  ostanatiDanociIznosiZaOdbivanje: "30 Останати даноци и износи за одбивање",
+  danochenDolgIliPobaruvanje: "31 Даночен долг / побарување",
+  description: "Опис",
+};
+
+/** Labels for Плати (Payroll) analyzer fields. */
+export const PAYROLL_FIELD_LABELS_MK: Record<string, string> = {
+  year: "Година",
+  companyName: "Назив на компанија",
+  // New analyzer fields (row-wise totals from MPIN)
+  brutoPlata: "Бруто плата (Бруто 2)",
+  pridonesPIO: "Придонес за ПИО",
+  pridonesZdravstvo: "Придонес за здравство",
+  pridonesProfesionalnoZaboluvanje: "Придонес за профес. здравствено осигурување",
+  pridonesVrabotuvanje: "Придонес за вработување",
+  personalenDanok: "Персонален данок",
+  vkupnaNetoPlata: "Вкупна нето плата",
+  // Legacy summary totals (kept for history / older scans)
+  totalGrossSalary: "Вкупно бруто плата",
+  totalNetSalary: "Вкупно нето плата",
+  totalPayrollCost: "Вкупни трошоци за вработени",
+  description: "Опис",
 };
 
 /** Keywords for OCR extraction from invoices (Macedonian-first, then English, German, etc.). */

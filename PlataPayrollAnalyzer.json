@@ -1,0 +1,73 @@
+{
+  "name": "PlataPayrollAnalyzer",
+  "description": "Custom analyzer for extracting structured data from Macedonian payroll / MPIN / salary cost documents (Плати, МПИН извештаи, трошоци за вработени) so they can be summarized into Excel salary cost templates.",
+  "fieldSchema": {
+    "fields": {
+      "documentType": {
+        "type": "string",
+        "method": "generate",
+        "description": "Return a short label that identifies this as a payroll / salary document, typically 'Плата' or 'Плати'. If the document explicitly uses labels like 'МПИН', 'Образец МПИН', 'РД-Трошоци за вработени', or 'Трошоци за плати', normalize to a single canonical value such as 'Плата'."
+      },
+      "period": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the salary period that this document covers. Look for Macedonian phrases like 'Период', 'За месец', 'За период', 'За месец / година', or formatted ranges like '01.01.2025 - 31.01.2025', 'Јануари 2025', '01/2025'. Return the full period text as it appears, normalized to a single string, and do not confuse it with the document issue date."
+      },
+      "date": {
+        "type": "date",
+        "method": "extract",
+        "description": "Extract the issue/creation date of the payroll document where available. Look for labels such as 'Датум', 'Дата', 'Датум изготвување', 'Дата на документ', or 'Date'. If multiple dates appear (e.g., signature date, approval date), choose the one that is clearly associated with document issue or signing."
+      },
+      "employerName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the full legal name of the employer (company paying the salaries). Look near the top of the document for labels and context like 'Друштво', 'Работодавач', 'Правно лице', 'Company', 'Employer', 'Firm', and similar. Prefer the name that is clearly identified as the entity submitting the MPIN or payroll report."
+      },
+      "employerAddress": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the full postal address of the employer, including street, number, city, postal code, and country where available. Look near the employer name for labels like 'Адреса', 'Седиште', 'Address'. Merge multi-line address blocks into a single string and avoid mixing in bank account details or contact person names."
+      },
+      "employerTaxId": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the employer’s tax identification number (ЕДБ, даночен број, VAT ID). Search for Macedonian and bilingual labels such as 'ЕДБ', 'Даночен број', 'Даночен број на обврзник', 'Tax ID', 'VAT ID', 'VAT No.'. Return only the normalized tax number, and ensure it belongs to the employer (not to the tax authority or another entity)."
+      },
+      "employeeCount": {
+        "type": "number",
+        "method": "extract",
+        "description": "If present, extract the total number of employees included in the payroll. Look for summary fields like 'Вкупно вработени', 'Број на вработени', 'Вработени лица вкупно', or 'Number of employees'. If the document does not clearly expose a total count, leave this field empty."
+      },
+      "netAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the total net salaries paid to employees for the period (сума која се исплаќа на вработените по одбивање на придонеси и персонален данок). Search summary areas and tables for labels such as 'Нето плати', 'Нето плата вкупно', 'За исплата вкупно', 'Netto плати', 'Net salaries'. Prefer the final aggregated amount for the entire period, not per-employee or per-row values."
+      },
+      "contributionsAndTax": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the total amount of social contributions and personal income tax related to the salaries in this period. Look for Macedonian labels and section titles like 'Придонеси', 'Придонеси и персонален данок', 'Социјални придонеси', 'Персонален данок', 'Вкупно придонеси и данок', as well as combined totals in summary tables. Return the combined amount for all employees and all types of contributions/tax if a single total is available."
+      },
+      "totalAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Extract the total employer cost for the period (вкупен трошок за работодавачот), which typically includes gross salaries plus all contributions and personal tax. Search for labels like 'Вкупен трошок за работодавачот', 'Вкупни трошоци за плати', 'Total employer cost', 'Вкупно трошоци за работна сила'. If no explicit total cost is shown, use the best available overall total that represents the full salary cost for the period."
+      },
+      "currency": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract the main currency code for the salary amounts, preferably as a three-letter code like 'MKD', 'EUR', 'USD'. Look near total rows and in headers for tokens like 'Валута', 'MKD', 'денари', 'EUR', '€'. If multiple currencies appear, pick the one that is directly associated with the salary totals and employer cost figures."
+      },
+      "reference": {
+        "type": "string",
+        "method": "extract",
+        "description": "Extract any key reference identifiers for this payroll document, such as MPIN submission numbers, internal payroll run numbers, or references to months/years in official forms. Look for labels like 'Референца', 'Број на пријава', 'MPIN број', 'Reference', 'Run ID'. If multiple identifiers are clearly related, combine them into a single string separated by semicolons and a space."
+      },
+      "description": {
+        "type": "string",
+        "method": "generate",
+        "description": "Generate a human-readable summary of the payroll document by scanning for narrative text near the header and summary sections. Include elements such as the covered period (e.g. 'Јануари 2025'), number of employees if visible, mention of 'МПИН', key totals (net salaries, contributions, total cost) and any special notes or remarks. Concatenate all relevant descriptive snippets into one continuous string separated by semicolons and a space, and avoid repeating pure numeric tables without context."
+      }
+    }
+  }
+}

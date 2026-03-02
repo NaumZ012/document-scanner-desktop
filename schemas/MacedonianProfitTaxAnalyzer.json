@@ -1,0 +1,323 @@
+{
+  "name": "FullTaxBalanceAnalyzer",
+  "description": "Complete extraction schema for the Macedonian 'Даночен биланс'. Extracts document metadata and all 59 AOP financial lines to map directly to an Excel document.",
+  "fieldSchema": {
+    "fields": {
+      "companyName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Full legal name of the taxpayer company (Скратен назив)."
+      },
+      "companyTaxId": {
+        "type": "string",
+        "method": "extract",
+        "description": "The 13-digit Tax identification number (Единствен даночен број / ЕДБ)."
+      },
+      "taxPeriodStart": {
+        "type": "string",
+        "method": "extract",
+        "description": "Start date of the tax period (Даночен период од)."
+      },
+      "taxPeriodEnd": {
+        "type": "string",
+        "method": "extract",
+        "description": "End date of the tax period (до)."
+      },
+      "finansiskiRezultatAOP1": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line I. - 'Финансиски резултат во Биланс на успех'. Extract the value for AOP 1. Default to 0 if empty."
+      },
+      "nepriznaeniRashodiAOP2": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line II. - 'Непризнаени расходи за даночни цели (збир од АОП 03 до АОП 29)'. Extract the value for AOP 2. Default to 0 if empty."
+      },
+      "rashodiNepovrzaniSoDejnostAOP3": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 1 - 'Расходи кои не се поврзани со вршење на дејноста на субјектот односно не се непосреден услов за извршување на дејноста и не се последица од вршењето на дејноста'. Extract the value for AOP 3."
+      },
+      "nadomestociNadIznaosAOP4": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 2 - 'Исплатени надоместоци на трошоци и други лични примања од работен однос над утврдениот износ'. Extract the value for AOP 4."
+      },
+      "nadomestociNeutvrdeniSoZakonAOP5": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 3 - 'Исплатени надоместоци на трошоци на вработените што не се утврдени со член 9 став 1 точка 2 од ЗДД'. Extract the value for AOP 5."
+      },
+      "troshociIshranaPrevozAOP6": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 4 - 'Трошоци за организирана исхрана и превоз исплатени над износите утврдени со закон'. Extract the value for AOP 6."
+      },
+      "troshociSmestuvanjeNevraboteniAOP7": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 5 - 'Трошоци за сместување и превоз за невработени лица кои не се документирани согласно член 9 став 1 точка 2 од ЗДД'. Extract the value for AOP 7."
+      },
+      "troshociIshranaNokjnoVremeAOP8": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 6 - 'Трошоци за исхрана на вработените кои работат ноќно време, над износите утврдени со закон'. Extract the value for AOP 8."
+      },
+      "nadomestociOrganiUpravuvanjeAOP9": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 7 - 'Трошоци по основ на месечни надоместоци на членови на органи на управување над висината утврдена со закон'. Extract the value for AOP 9."
+      },
+      "dobrovolenPenziskiFondAOP10": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 8 - 'Трошоци по основ на уплатени доброволни придонеси во доброволен пензиски фонд над висината утврдена со закон'. Extract the value for AOP 10."
+      },
+      "premiiOsiguruvanjeZhivotAOP11": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 9 - 'Трошоци по основ на уплатени премии за осигурување на живот над висината утврдена со закон'. Extract the value for AOP 11."
+      },
+      "nadomestociVolonteriAOP12": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 10 - 'Надоместоци за лица волонтери и за лица ангажирани за вршење на јавни работи над износите утврдени со закон'. Extract the value for AOP 12."
+      },
+      "skrieniIsplatiDobivkiAOP13": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 11 - 'Скриени исплати на добивки'. Extract the value for AOP 13."
+      },
+      "kusociNepredizvikaniAOP14": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 12 - 'Кусоци кои не се предизвикани од вонредни настани (кражба, пожар или други природни непогоди)'. Extract the value for AOP 14."
+      },
+      "troshociReprezentacijaAOP15": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 13 - 'Трошоци за репрезентација'. Extract the value for AOP 15."
+      },
+      "troshociDonaciiNad5PostoAOP16": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 14 - 'Вкупни трошоци за донации од Законот за донации и спонзорства во јавните дејности, освен износот на донациите за кои се користи данчно ослободување до 5% од вкупниот приход остварен во годината'. Extract the value for AOP 16."
+      },
+      "troshociSponzorstvaNad3PostoAOP17": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 15 - 'Трошоци за спонзорства направени во согласност со Законот за донации и спонзорства во јавните дејности, над 3% од вкупниот приход остварен во годината'. Extract the value for AOP 17."
+      },
+      "troshociDonaciiSportAOP18": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 16 - 'Трошоци за донации во спортот согласно член 30-а и 30-б од ЗДД'. Extract the value for AOP 18."
+      },
+      "kamataKreditiNekoristeniZaDejnostAOP19": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 17 - 'Трошоци по основ на камата по кредити кои не се користат за вршење на дејноста на обврзникот'. Extract the value for AOP 19."
+      },
+      "osiguritelniPremiiAOP20": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 18 - 'Осигурителни премии кои ги плаќа работодавачот во корист на членови на органите на управување, и на вработени'. Extract the value for AOP 20."
+      },
+      "danociZadrshkaIsplateniZaTretiLicaAOP21": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 19 - 'Даноци по задршка (одбивка) исплатени во име на трети лица кои се на товар на трошоците на обврзник'. Extract the value for AOP 21."
+      },
+      "kazniPenaliKamatiAOP22": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 20 - 'Парични и даночни казни, пенали и казнени камати за ненавремена уплата на јавни давачки и на трошоци за присилна наплата'. Extract the value for AOP 22."
+      },
+      "isplatiStipendiiAOP23": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 21 - 'Исплати на стипендии'. Extract the value for AOP 23."
+      },
+      "troshociKaloRasturAOP24": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 22 - 'Трошоци на кало, растур, крш и расипување'. Extract the value for AOP 24."
+      },
+      "traenOtpisNenaplateniPobaruvanjaAOP25": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 23 - 'Траен отпис на ненаплатени побарувања'. Extract the value for AOP 25."
+      },
+      "delovnaUspeshnostNadIznaosAOP26": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 24 - 'Трошоци за нето износот на примањата по основ на деловна успешност над износот на кој се пресметани придонеси согласно закон'. Extract the value for AOP 26."
+      },
+      "praktikantskaRabotaNadIznaosAOP27": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 25 - 'Трошоци за практикантска работа нас износот пропишан по закон за практиканство'. Extract the value for AOP 27."
+      },
+      "prakticnaObukaNad8000AOP28": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 26 - 'Трошоци за практична обука на ученици и практична настава на студенти во висина над 8.000 мкд'. Extract the value for AOP 28."
+      },
+      "amortizacijaRevaloriziranaVrednostAOP29": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 27 - 'Трошоци за амортизација на ревалоризираната вредност на материјални и нематеријални средства'. Extract the value for AOP 29."
+      },
+      "amortizacijaPovisokaOdPropishanaAOP30": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 28 - 'Трошоци за амортиација и ревалоризација на материјални и нематеријални средства која е повисока од амортизацијата пресметана на набавната вредност со примена на стапките на пропишаните согласно номенклатура на средствата за амортизација'. Extract the value for AOP 30."
+      },
+      "preostanataVrednostNeiskoristeniSredstvaAOP31": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 29 - 'Преостаната сегашна вредност на основните средства кои не се користат, а се амортизираат во целост за кои не е издадена согласност од управата за јавни приходи'. Extract the value for AOP 31."
+      },
+      "ispravkaVrednostNenaplateniPobaruvanjaAOP32": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 30 - 'Трошоци за исправка на вредноста на ненаплатени побарувања'. Extract the value for AOP 32."
+      },
+      "nenaplateniPobaruvanjaZaemAOP33": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 31 - 'Износ на ненаплатени побарувања од заем'. Extract the value for AOP 33."
+      },
+      "razlikaTransfernaPazarnaRashodiAOP34": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 32 - 'Износ на позитивна разлика меѓу расходите кои произлегуваат од трансакција по трансферна цена и расходите кои произлегуваат од таа трансакција по пазарна цена  утврдена по принципот на дофат на рака меѓу поврзани лица'. Extract the value for AOP 34."
+      },
+      "razlikaTransfernaPazarnaPrihodiAOP35": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 33 - 'Износ на позитивна разлика меѓу приходите кои произлегуваат од трансакција по трансферна цена и приходите кои произлегуваат од таа трансакција по пазарна цена  утврдена по принципот на дофат на рака меѓу поврзани лица'. Extract the value for AOP 35."
+      },
+      "kamatiZaemiPovrzanoLiceAOP36": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 34 - 'Износ на дел од камати по заеми кои се добиени од поврзано лице кое не е банка или друга овластена кредитна институција, кој го надминува износот кој би се остварил доколку се работи за неповрзани лица'. Extract the value for AOP 36."
+      },
+      "zatezniKamatiPovrzanoLiceAOP37": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 35 - 'Износ на затезни камати кои произлегуваат од односите со поврзано лице кое не е банка или друга овластена кредитна институција'. Extract the value for AOP 37."
+      },
+      "kamatiZaemiNerezidenti25PostoAOP38": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 36 - 'Износ на камати на заеми добиени од содружници или акционери – нерезиденти со најмалку од 25% учество во капиталот'. Extract the value for AOP 38."
+      },
+      "drugiUsoglasuvanjaRashodiAOP39": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 37 - 'Други усогласувања на расходи'. Extract the value for AOP 39."
+      },
+      "danochnaOsnovaAOP40": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line III. - 'Даночна основа (I+II)'. Extract the value for AOP 40."
+      },
+      "namaluvanjeDanochnaOsnovaAOP41": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line IV. - 'Намалување на даночна основа (АОП 32+АОП33+АОП34+АОП35+АОП36)'. Extract the value for AOP 41."
+      },
+      "naplateniPobaruvanjaPrethodenPeriodAOP42": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 38 - 'Износ на наплатени побарувања за кои во претходниот период е зголемена даночната основа'. Extract the value for AOP 42."
+      },
+      "vratenZaemPrethodenPeriodAOP43": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 39 - 'Износ на вратен дел од заем за кои во претходните даночни периоди било извршено зголемување на даночната основа'. Extract the value for AOP 43."
+      },
+      "amortizacijaNadIznaosPrethodenPeriodAOP44": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 40 - 'Износ на трошоците на амортизација над износот пресметан во примена на амортизациони стапки утврдени со номенклатурата на средствата за амортизација и годишните амортизациони стапки за кои во претходниот период е извршено зголемување на даночната основа'. Extract the value for AOP 44."
+      },
+      "neisplateniNadomestociPrethodenPeriodAOP45": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 41 - 'Износ на неисплатени надоместоци над износите утврдени во член 9 став 1 точки 2) 3-б) 4) 5) 5-а) и б), од ЗДД , за кои во претходниот период е извршено зголемување на даночната основа, доколку истите се искажани како приход'. Extract the value for AOP 45."
+      },
+      "dividendiOdanocheniKajIsplatuvacAOP46": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 42 - 'Дивиденди остварени со учество во капиталот на друг даночен обврзник, оданочени со данок на добивка кај исплатувачот'. Extract the value for AOP 46."
+      },
+      "zagubaOdPrethodniGodiniAOP47": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 43 - 'Дел од загуба намалена за непризнаени расходи, пренесена од претходни години'. Extract the value for AOP 47."
+      },
+      "vlozhuvanjaReinvestiranaDobivkaAOP48": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 44 - 'Износ на извршени вложувања од добивката (реинвестирана)'. Extract the value for AOP 48."
+      },
+      "danochnaOsnovaPoNamaluvanjeAOP49": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line V. - 'Даночна основа по намалување (III- IV)'. Extract the value for AOP 49."
+      },
+      "presmetanDanokNaDobivkaAOP50": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line VI. - 'Пресметан данок на добивка (V x 10%)'. Extract the value for AOP 50."
+      },
+      "namaluvanjePresmetanDanokAOP51": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line VII. - 'Намалување на пресметаниот данок на добивка (АОП40+АОП41+АОП42+АОП43)'. Extract the value for AOP 51."
+      },
+      "namaluvanjeDanokFiskalniSistemiAOP52": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 45 - 'Намалување на данокот за вредноста на набавени и ставени во употреба до 10 фискални системи на опрема за регистрирање на готовински плаќања'. Extract the value for AOP 52."
+      },
+      "danokSodrzhanVoStranstvoAOP53": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 46 - 'Износ на данок содржан во оданочени приходи/ добивки во странство (withholding tax) до пропишаната стапка'. Extract the value for AOP 53."
+      },
+      "danokPlatenOdPodruznicaVoStranstvoAOP54": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 47 - 'Данок кој го платила подружницата во странство за добивката вклучена во приходите на матичното правно лице во Р.М. но не повеќе од износот на данокот по пропишаната стапка во ЗДД'. Extract the value for AOP 54."
+      },
+      "danochnoOlesnuvanjeDonacijaAOP55": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 48 - 'Износ на пресметано даночно олеснување за дадена донација утврдена во согласност со членовите 30-а и 30-б од ЗДД'. Extract the value for AOP 55."
+      },
+      "presmetanDanokPoNamaluvanjeAOP56": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line VIII. - 'Пресметан данок по намалување (VI-VII)'. Extract the value for AOP 56."
+      },
+      "plateniAkontaciiAOP57": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 49 - 'Платени аконтации на данокот на добивка за даночниот период'. Extract the value for AOP 57."
+      },
+      "povekjePlatenDanokOdPrethodniAOP58": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 50 - 'Износ на повеќе платен данок на добивка пренесен од претходните даночни периоди'. Extract the value for AOP 58."
+      },
+      "iznosZaDoplataAOP59": {
+        "type": "number",
+        "method": "extract",
+        "description": "Line 51 - 'Износ за доплата / повеќе платен износ (АОП 44 - АОП 45 - АОП 46)'. Extract the value for AOP 59."
+      }
+    }
+  }
+}

@@ -1,9 +1,9 @@
 import { memo, useState, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
 import type { ExtractedField } from "@/shared/types";
-import { FIELD_INPUT_TYPE, FIELD_TEXTAREA } from "@/shared/constants";
+import { FIELD_INPUT_TYPE, FIELD_TEXTAREA, ANALYZER_FIELD_INPUT_TYPE } from "@/shared/constants";
 import type { FieldKey } from "@/shared/constants";
-import { formatAmountForDisplay } from "@/utils/fieldUtils";
+import { formatAmountForDisplay, normalizeAmountInput } from "@/utils/fieldUtils";
 import styles from "./DataCard.module.css";
 
 interface DataCardProps {
@@ -17,8 +17,8 @@ function DataCardInner({ field, onChange, placeholderPrefix = "Enter" }: DataCar
   const isLowConfidence =
     field.confidence != null && field.confidence < confidenceThreshold;
   const hasValue = !!field.value?.trim();
-  const inputType = FIELD_INPUT_TYPE[field.key as FieldKey];
-  const useTextarea = FIELD_TEXTAREA.includes(field.key as FieldKey);
+  const inputType = FIELD_INPUT_TYPE[field.key as FieldKey] ?? ANALYZER_FIELD_INPUT_TYPE[field.key];
+  const useTextarea = FIELD_TEXTAREA.includes(field.key as FieldKey) || field.key === "description";
   const isAmount = inputType === "amount";
   const type =
     inputType === "date" ? "date" : inputType === "amount" ? "text" : "text";
@@ -43,9 +43,9 @@ function DataCardInner({ field, onChange, placeholderPrefix = "Enter" }: DataCar
     const newValue = e.target.value;
     setDisplayValue(newValue);
     if (isAmount) {
-      // Parse formatted value back to raw format for storage (replace comma with period)
-      const raw = newValue.replace(/,/g, ".");
-      onChange(field.key, raw);
+      // Normalize formatted value back to canonical "dot decimal, no thousands" for storage.
+      const normalized = normalizeAmountInput(newValue);
+      onChange(field.key, normalized);
     } else {
       onChange(field.key, newValue);
     }
@@ -65,7 +65,15 @@ function DataCardInner({ field, onChange, placeholderPrefix = "Enter" }: DataCar
 
   return (
     <div className={`${styles.card} ${isLowConfidence ? styles.lowConfidence : ""} ${hasValue ? styles.filled : ""}`}>
-      <label className={styles.label}>{field.label}</label>
+      <div className={styles.labelRow}>
+        <label className={styles.label}>{field.label}</label>
+        <span
+          className={field.confidence != null ? `${styles.confidenceBadge} ${isLowConfidence ? styles.confidenceLow : styles.confidenceOk}` : styles.confidenceMissing}
+          title="Доверба (од моделот)"
+        >
+          {field.confidence != null ? `${Math.round(field.confidence * 100)}%` : "—"}
+        </span>
+      </div>
       {useTextarea ? (
         <textarea
           className={styles.textarea}

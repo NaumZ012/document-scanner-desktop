@@ -4,13 +4,13 @@ use crate::excel;
 use crate::models::ExcelSchema;
 use crate::ocr;
 use crate::services::excel_scanner;
-use crate::types::{InvoiceData, RowCell, FailedScan, BatchScanResult};
+use crate::types::{InvoiceData, RowCell, FailedScan, BatchScanResult, InvoiceFieldValue};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 use tauri::{AppHandle, Manager, State};
@@ -158,7 +158,7 @@ pub fn run_ocr(file_path: String) -> Result<crate::types::OcrResult, String> {
 }
 
 #[tauri::command]
-pub async fn run_ocr_invoice(file_path: String, document_type: Option<String>) -> Result<crate::types::InvoiceData, String> {
+pub async fn run_ocr_invoice(file_path: String, document_type: Option<String>) -> Result<crate::types::OcrInvoiceResult, String> {
     let path = file_path.clone();
     let doc_type = document_type.clone();
     tauri::async_runtime::spawn_blocking(move || ocr::run_ocr_invoice(&path, doc_type.as_deref()))
@@ -166,10 +166,10 @@ pub async fn run_ocr_invoice(file_path: String, document_type: Option<String>) -
         .map_err(|e| e.to_string())?
 }
 
-/// Run OCR on up to 5 PDFs at a time; returns both successful and failed results.
+/// Run OCR on multiple PDFs in parallel; returns both successful and failed results.
 #[tauri::command]
 pub async fn batch_scan_invoices(pdf_paths: Vec<String>, document_type: Option<String>) -> Result<BatchScanResult, String> {
-    const CONCURRENCY: usize = 5;
+    const CONCURRENCY: usize = 8;
     let mut successes = Vec::new();
     let mut failures = Vec::new();
     let doc_type = document_type.clone();
@@ -201,7 +201,35 @@ pub async fn batch_scan_invoices(pdf_paths: Vec<String>, document_type: Option<S
         
         for ((path, filename), h) in chunk_paths.into_iter().zip(handles) {
             match h.await {
-                Ok(Ok(mut inv)) => {
+                Ok(Ok(res)) => {
+                    let mut inv = res.invoice_data;
+                    // Ensure document_type is populated for batch flows when the user selected
+                    // a specific document type on the Home screen (Фактури, Даночен биланс, ДДВ, Плати).
+                    if let Some(ref dt) = doc_type {
+                        let friendly = match dt.as_str() {
+                            "smetka" => Some("Даночен биланс"),
+                            "generic" => Some("ДДВ"),
+                            "plata" => Some("Плата"),
+                            "faktura" => Some("Фактура"),
+                            _ => None,
+                        };
+                        if let Some(label) = friendly {
+                            let needs_set = inv
+                                .fields
+                                .get("document_type")
+                                .map(|v| v.value.trim().is_empty())
+                                .unwrap_or(true);
+                            if needs_set {
+                                inv.fields.insert(
+                                    "document_type".to_string(),
+                                    InvoiceFieldValue {
+                                        value: label.to_string(),
+                                        confidence: Some(1.0),
+                                    },
+                                );
+                            }
+                        }
+                    }
                     inv.source_file = Some(filename.clone());
                     inv.source_file_path = Some(path.clone());
                     successes.push(inv);
@@ -250,6 +278,174 @@ pub async fn export_invoices_to_new_excel(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn export_to_new_excel_with_columns(
+    path: String,
+    worksheet_name: String,
+    headers: Vec<String>,
+    column_field_keys: Vec<String>,
+    invoices: Vec<InvoiceData>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        excel::export_to_new_excel_with_columns(
+            &path,
+            &worksheet_name,
+            &headers,
+            &column_field_keys,
+            &invoices,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Copy the profile's template file to dest_path and append each invoice as a row.
+/// Preserves the template's exact layout (merged headers, styling). Use this for Даночен биланс etc.
+#[tauri::command]
+pub async fn copy_template_and_append_rows(
+    state: State<'_, AppState>,
+    profile_id: i64,
+    dest_path: String,
+    invoices: Vec<InvoiceData>,
+) -> Result<String, String> {
+    if invoices.is_empty() {
+        return Err("No invoices to export".to_string());
+    }
+    let (excel_path, sheet_name, column_mapping_json): (String, String, String) = {
+        let db = state.db.lock().map_err(|e: std::sync::PoisonError<_>| e.to_string())?;
+        let db = db.as_ref().ok_or("Database not initialized")?;
+        db.get_profile_by_id(profile_id)?
+    };
+    let schema = {
+        if let Some(cached) = schema_cache::get_cached_schema(profile_id) {
+            let db = state.db.lock().map_err(|e: std::sync::PoisonError<_>| e.to_string())?;
+            let db = db.as_ref().ok_or("Database not initialized")?;
+            if is_cache_valid(db, profile_id, &cached)? {
+                cached
+            } else {
+                let db = state.db.lock().map_err(|e: std::sync::PoisonError<_>| e.to_string())?;
+                let db = db.as_ref().ok_or("Database not initialized")?;
+                db.load_excel_schema(profile_id)?
+            }
+        } else {
+            let db = state.db.lock().map_err(|e: std::sync::PoisonError<_>| e.to_string())?;
+            let db = db.as_ref().ok_or("Database not initialized")?;
+            db.load_excel_schema(profile_id)?
+        }
+    };
+    let column_mapping: std::collections::HashMap<String, String> =
+        serde_json::from_str(&column_mapping_json).map_err(|e| format!("Invalid column_mapping: {}", e))?;
+
+    let template_path = excel_path.clone();
+    let dest = dest_path.clone();
+    let sheet = sheet_name.clone();
+    let inv = invoices;
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::copy(Path::new(&template_path), Path::new(&dest)).map_err(|e| e.to_string())?;
+        let mut row = schema.next_free_row;
+        for invoice in &inv {
+            let mut column_values = Vec::new();
+            for h in &schema.headers {
+                let field_key = column_mapping
+                    .get(&h.column_letter)
+                    .or_else(|| column_mapping.get(&h.column_letter.to_uppercase()))
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("col_{}", h.column_letter));
+                let value = invoice
+                    .fields
+                    .get(&field_key)
+                    .map(|v| v.value.clone())
+                    .unwrap_or_default();
+                column_values.push((h.column_letter.clone(), value));
+            }
+            excel::append_row_to_excel_at_row(&dest, &sheet, row, column_values)?;
+            row += 1;
+        }
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(dest_path)
+}
+
+/// Row (1-based) in РД-Данок на добивка template for each AOP field — value is written to column D.
+/// FullTaxBalanceAnalyzer: aop_1=row 10, aop_2=11, …, aop_59=68.
+fn tax_balance_row_map() -> Vec<(String, u32)> {
+    (1..=59).map(|i| (format!("aop_{}", i), 9 + i as u32)).collect()
+}
+
+/// Prefer the repo example template so the exported file matches the exact layout (first picture).
+fn tax_balance_example_template_path() -> Option<PathBuf> {
+    let rel = PathBuf::from("example")
+        .join("Примери за автоматизирање на процеси")
+        .join("Даночен биланс")
+        .join("РД-Данок на добивка-2024-Example.xlsx");
+    let mut dir = std::env::current_dir().ok()?;
+    for _ in 0..10 {
+        let candidate = dir.join(&rel);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+    None
+}
+
+/// Copy the profile's template to dest_path and fill column D at the fixed rows (Даночен биланс form layout).
+/// Prefers the repo example template when present so the layout matches the first picture exactly.
+/// Legacy `profile_id` argument is ignored for new fixed-template flow; DB is only used as a fallback
+/// when the bundled example template is not found.
+#[tauri::command]
+pub async fn copy_template_and_fill_tax_balance(
+    state: State<'_, AppState>,
+    profile_id: i64,
+    dest_path: String,
+    invoice: InvoiceData,
+) -> Result<String, String> {
+    // 1) Try to use the bundled Даночен биланс example template from the repo.
+    // 2) If not found, fall back to any legacy profile template (for older DBs),
+    //    but do NOT fail with "Profile not found" when profiles are no longer used.
+    let template_path = if let Some(p) = tax_balance_example_template_path() {
+        p.to_str().map(String::from)
+    } else if profile_id > 0 {
+        // Legacy fallback: try to read template path from DB, but swallow errors and let caller know
+        // if nothing could be found.
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|e: std::sync::PoisonError<_>| e.to_string())?;
+        let db = db_guard.as_ref().ok_or("Database not initialized")?;
+        match db.get_profile_by_id(profile_id) {
+            Ok((excel_path, _sheet_name, _)) => Some(excel_path),
+            Err(_) => None,
+        }
+    } else {
+        None
+    }
+    .ok_or_else(|| "Не можам да ја најдам Excel шаблон датотеката за Даночен биланс.".to_string())?;
+
+    let dest = dest_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::copy(Path::new(&template_path), Path::new(&dest)).map_err(|e| e.to_string())?;
+        let updates: Vec<(u32, &'static str, String)> = tax_balance_row_map()
+            .into_iter()
+            .map(|(field_key, row)| {
+                let value = invoice.fields.get(&field_key).map(|v| v.value.clone()).unwrap_or_default();
+                (row, "D", value)
+            })
+            .collect();
+        let refs: Vec<(u32, &str, &str)> = updates
+            .iter()
+            .map(|(r, c, v)| (*r, *c, v.as_str()))
+            .collect();
+        excel::fill_tax_balance_cells_via_zip(Path::new(&dest), &refs)?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(dest_path)
 }
 
 #[tauri::command]
@@ -534,25 +730,17 @@ pub async fn append_to_excel_fast(
 
     let row_number = schema.next_free_row;
     let mut column_values = Vec::new();
-    for (idx, h) in schema.headers.iter().enumerate() {
-        let value = if idx == 0 {
-            invoice_data
-                .fields
-                .get("document_type")
-                .map(|v| v.value.clone())
-                .unwrap_or_else(|| "Фактура".to_string())
-        } else {
-            let field_key = column_mapping
-                .get(&h.column_letter)
-                .or_else(|| column_mapping.get(&h.column_letter.to_uppercase()))
-                .map(String::from)
-                .unwrap_or_else(|| format!("col_{}", h.column_letter));
-            invoice_data
-                .fields
-                .get(&field_key)
-                .map(|v| v.value.clone())
-                .unwrap_or_default()
-        };
+    for h in schema.headers.iter() {
+        let field_key = column_mapping
+            .get(&h.column_letter)
+            .or_else(|| column_mapping.get(&h.column_letter.to_uppercase()))
+            .map(String::from)
+            .unwrap_or_else(|| format!("col_{}", h.column_letter));
+        let value = invoice_data
+            .fields
+            .get(&field_key)
+            .map(|v| v.value.clone())
+            .unwrap_or_else(String::new);
         column_values.push((h.column_letter.clone(), value));
     }
 

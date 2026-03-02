@@ -3,25 +3,19 @@ import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
 import { DataCard } from "@/components/DataCard";
 import { DocumentPreview } from "@/components/DocumentPreview";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
-  getProfiles,
   updateHistoryStatus,
   updateHistoryRecord,
   deleteHistoryRecord,
-  validateExcelFile,
-  appendToExcelFast,
+  buildExtractedDataWithConfidence,
+  exportInvoicesToNewExcel,
+  copyTemplateAndFillTaxBalance,
 } from "@/services/api";
 import type { ExtractedField } from "@/shared/types";
-import { FIELD_LABELS_MK, GROUP_LABELS_MK } from "@/shared/constants";
-import type { FieldKey } from "@/shared/constants";
-import { sortFieldsByData, groupFieldsForDisplay, buildProfileDisplayFields } from "@/utils/fieldUtils";
+import { getSchemaForDocumentType, normalizeDocumentType, TAX_BALANCE_FORM_ROWS } from "@/shared/documentTypeSchemas";
 import { fixDisplayValue } from "@/utils/displayFix";
-import { analyzeSchema } from "@/services/schemaService";
-import { appendRowViaBackend } from "@/services/excelService";
-import { recordMapping } from "@/services/learningService";
-import type { FieldMapping } from "@/services/mappingService";
-
-type GroupedFieldItem = ReturnType<typeof groupFieldsForDisplay>[number];
+import { formatNumberForExcel } from "@/utils/fieldUtils";
 import styles from "./Review.module.css";
 
 export function Review() {
@@ -29,21 +23,18 @@ export function Review() {
     review,
     setScreen,
     setReview,
-    selectedProfileId,
-    setSelectedProfileId,
-    defaultProfileId,
     confirmBeforeExport,
+    confidenceThreshold,
   } = useApp();
   const { success, error: showError } = useToast();
   const [fields, setFields] = useState<ExtractedField[]>([]);
-  const [profiles, setProfiles] = useState<[number, string, string, string, string][]>([]);
-  const [profileSchemaHeaders, setProfileSchemaHeaders] = useState<string[] | null>(null);
-  const [profileSchemaLoading, setProfileSchemaLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [splitView, setSplitView] = useState(true);
 
   const fromHistory = review?.fromHistory === true;
+  const docTypeId = useMemo(() => normalizeDocumentType(review?.documentType), [review?.documentType]);
 
   useEffect(() => {
     if (review) {
@@ -53,78 +44,62 @@ export function Review() {
     }
   }, [review]);
 
-  useEffect(() => {
-    getProfiles()
-      .then(setProfiles)
-      .catch(() => setProfiles([]));
-  }, []);
-
-  useEffect(() => {
-    if (profiles.length > 0 && selectedProfileId == null && defaultProfileId != null) {
-      const exists = profiles.some((p) => p[0] === defaultProfileId);
-      if (exists) setSelectedProfileId(defaultProfileId);
-    }
-  }, [profiles, selectedProfileId, defaultProfileId, setSelectedProfileId]);
-
-  // Load Excel schema (headers) when profile is selected so we show Excel-driven fields.
-  // When no profile is selected but profiles exist, use first profile so Excel-driven view is default.
-  // Clear headers when starting load so we never flash stale or English view; keep "Loading…" until schema is ready.
-  useEffect(() => {
-    const effectiveId = selectedProfileId ?? profiles[0]?.[0];
-    const profile = effectiveId != null ? profiles.find((p) => p[0] === effectiveId) : null;
-    if (!profile) {
-      setProfileSchemaHeaders(null);
-      setProfileSchemaLoading(false);
-      return;
-    }
-    const [, , excelPath, sheetName, mappingJson] = profile;
-    let parsed: Record<string, string & number> = {};
-    try {
-      parsed = JSON.parse(mappingJson) as Record<string, string & number>;
-    } catch {
-      setProfileSchemaHeaders(null);
-      setProfileSchemaLoading(false);
-      return;
-    }
-    const headerRow = (typeof parsed._headerRow === "number" && parsed._headerRow >= 1)
-      ? parsed._headerRow
-      : 1;
-    setProfileSchemaHeaders(null);
-    setProfileSchemaLoading(true);
-    analyzeSchema(excelPath, headerRow, sheetName)
-      .then((schema) => setProfileSchemaHeaders(schema.headers))
-      .catch(() => setProfileSchemaHeaders(null))
-      .finally(() => setProfileSchemaLoading(false));
-  }, [selectedProfileId, profiles]);
-
-  const groupedFields = useMemo(
-    () => groupFieldsForDisplay(sortFieldsByData(fields)),
-    [fields]
+  const schema = useMemo(
+    () => getSchemaForDocumentType(review?.documentType),
+    [review?.documentType]
   );
 
-  // Effective profile (selected or first) for display; show loading until its schema is ready.
-  const hasEffectiveProfile =
-    (selectedProfileId ?? profiles[0]?.[0]) != null && profiles.some((p) => p[0] === (selectedProfileId ?? profiles[0]?.[0]));
-  const schemaNotReady = hasEffectiveProfile && profileSchemaLoading;
+  const keyToField = useMemo(() => {
+    const map = new Map<string, ExtractedField>();
+    for (const f of fields) map.set(f.key, f);
+    return map;
+  }, [fields]);
 
-  // When a profile is selected (or defaulted to first) and its schema is loaded, show only that Excel's columns (in order) with header labels.
-  const profileDisplayFields = useMemo(() => {
-    const effectiveId = selectedProfileId ?? profiles[0]?.[0];
-    const profile = effectiveId != null ? profiles.find((p) => p[0] === effectiveId) : null;
-    if (!profile || !profileSchemaHeaders?.length) return null;
-    const [, , , , mappingJson] = profile;
-    let parsed: Record<string, string> = {};
-    try {
-      parsed = JSON.parse(mappingJson) as Record<string, string>;
-    } catch {
-      return null;
+  const displayFields = useMemo((): ExtractedField[] => {
+    if (!schema) return [];
+    // Only show fields that are part of the fixed schema for this document type.
+    const schemaPart: ExtractedField[] = schema.fields.map((def) => {
+      const existing = keyToField.get(def.key);
+      return {
+        key: def.key,
+        label: def.label,
+        value: existing?.value ?? "",
+        confidence: existing?.confidence,
+      };
+    });
+    return schemaPart;
+  }, [schema, keyToField]);
+
+  /** Sorted by confidence descending: highest first, lowest/undefined last. */
+  const sortedDisplayFields = useMemo((): ExtractedField[] => {
+    return [...displayFields].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  }, [displayFields]);
+
+  /** Average confidence over fields that have a confidence value (0–1). */
+  const averageConfidence = useMemo((): number | null => {
+    const withConf = displayFields.filter((f) => f.confidence != null);
+    if (withConf.length === 0) return null;
+    const sum = withConf.reduce((acc, f) => acc + (f.confidence ?? 0), 0);
+    return sum / withConf.length;
+  }, [displayFields]);
+
+  /** Summary of empty and low-confidence fields for user warnings. */
+  const reviewWarnings = useMemo(() => {
+    if (!schema) return { empty: 0, lowConfidence: 0 };
+    let empty = 0;
+    let lowConfidence = 0;
+    for (const def of schema.fields) {
+      const f = keyToField.get(def.key);
+      const value = f?.value?.trim() ?? "";
+      const conf = f?.confidence;
+      if (!value) {
+        empty += 1;
+      } else if (conf != null && conf < confidenceThreshold) {
+        lowConfidence += 1;
+      }
     }
-    const columnMapping: Record<string, string> = {};
-    for (const [col, fieldKey] of Object.entries(parsed)) {
-      if (col !== "_headerRow" && col !== "_schemaHash" && fieldKey) columnMapping[col] = fieldKey;
-    }
-    return buildProfileDisplayFields(profileSchemaHeaders, columnMapping, fields);
-  }, [selectedProfileId, profiles, profileSchemaHeaders, fields]);
+    return { empty, lowConfidence };
+  }, [schema, keyToField, confidenceThreshold]);
 
   const handleFieldChange = useCallback((key: string, value: string) => {
     setFields((prev) => {
@@ -141,7 +116,7 @@ export function Review() {
 
   const handleSave = useCallback(async () => {
     if (!review?.fromHistory || review.historyId == null) return;
-    const extractedData = Object.fromEntries(fields.map((f) => [f.key, f.value]));
+    const extractedData = buildExtractedDataWithConfidence(fields);
     setSaving(true);
     try {
       await updateHistoryRecord({
@@ -161,71 +136,74 @@ export function Review() {
     }
   }, [review, fields, setReview, setScreen, success, showError]);
 
-  const addToExcelWithProfile = useCallback(
-    async (profileId: number, excelPath: string, sheetName: string, mappingJson: string) => {
-      const data = Object.fromEntries(fields.map((f) => [f.key, f.value]));
-      const invoiceData = {
-        fields: Object.fromEntries(fields.map((f) => [f.key, { value: f.value }])),
-      };
-      try {
-        await appendToExcelFast(profileId, invoiceData);
-        return;
-      } catch {
-        /* Fallback: no cached schema, use full analyze + append */
-      }
-      const excelVal = await validateExcelFile(excelPath);
-      if (!excelVal.valid) {
-        throw new Error(excelVal.error ?? "Excel file cannot be used. Please close it if open and try again.");
-      }
-      let parsed: Record<string, string> = {};
-      try {
-        parsed = JSON.parse(mappingJson);
-      } catch {
-        throw new Error("Invalid profile mapping.");
-      }
-      const headerRow = (typeof parsed._headerRow === "number" && parsed._headerRow >= 1)
-        ? parsed._headerRow
-        : 1;
-      const schema = await analyzeSchema(excelPath, headerRow, sheetName);
-      const columnToField: Record<string, string> = {};
-      for (const [col, fieldKey] of Object.entries(parsed)) {
-        if (col !== "_headerRow" && col !== "_schemaHash" && fieldKey) columnToField[col] = fieldKey;
-      }
-      const fieldMapping: FieldMapping = {
-        columnToField,
-        confidenceMap: {},
-        requiresReview: false,
-        schemaHash: schema.schemaHash,
-        worksheetName: sheetName,
-        headers: schema.headers,
-      };
-      await appendRowViaBackend(excelPath, sheetName, fieldMapping, data, schema.lastDataRow);
-      await recordMapping(schema, fieldMapping);
-    },
-    [fields]
-  );
-
   const handleExport = useCallback(async () => {
     if (!review?.fromHistory || review.historyId == null) return;
     if (confirmBeforeExport && !window.confirm("Да го извезам во Excel?")) return;
-    const profileId = selectedProfileId ?? profiles[0]?.[0];
-    if (!profileId) {
-      showError("Нема Excel профил. Оди во Поставки за да креираш.");
-      return;
-    }
-    const profile = profiles.find((p) => p[0] === profileId);
-    if (!profile) {
-      showError("Профилот не е пронајден.");
-      return;
-    }
-    const [, , excelPath, sheetName, mappingJson] = profile;
     setAdding(true);
     try {
-      await addToExcelWithProfile(profileId, excelPath, sheetName, mappingJson);
+      const docType = docTypeId;
+      if (docType === "smetka") {
+        // Даночен биланс: copy official template and fill AOP column (D).
+        const path = await save({
+          filters: [{ name: "Excel", extensions: ["xlsx"] }],
+          defaultPath: `Даночен_биланс_${new Date().toISOString().slice(0, 10)}.xlsx`,
+          title: "Зачувај како",
+        });
+        if (path == null) {
+          setAdding(false);
+          return;
+        }
+        const invoiceData = {
+          fields: Object.fromEntries(
+            fields.map((f) => [
+              f.key,
+              {
+                value: f.value,
+              },
+            ])
+          ),
+        };
+        await copyTemplateAndFillTaxBalance(0, path, invoiceData);
+      } else if (docType === "faktura") {
+        // Invoices: append single row into a new workbook with fixed Example-Invoices layout.
+        const defaultName = `Фактури_${new Date().toISOString().slice(0, 10)}_${Date.now()
+          .toString()
+          .slice(-6)}.xlsx`;
+        const path = await save({
+          filters: [{ name: "Excel", extensions: ["xlsx"] }],
+          defaultPath: defaultName,
+          title: "Зачувај како",
+        });
+        if (path == null) {
+          setAdding(false);
+          return;
+        }
+        const invoiceData = {
+          fields: Object.fromEntries(
+            fields.map((f) => [
+              f.key,
+              {
+                value:
+                  f.key === "net_amount" ||
+                  f.key === "tax_amount" ||
+                  f.key === "total_amount"
+                    ? formatNumberForExcel(f.value)
+                    : f.value,
+              },
+            ])
+          ),
+        } as any;
+        await exportInvoicesToNewExcel([invoiceData] as any, path, "Invoices");
+      } else {
+        // For ДДВ и Плати we'll wire dedicated templates via batch export; from history we just save edits.
+        showError("Извозот во Excel за овој тип користи групен извоз. Користи „Преглед на скенирани документи“ за извоз.");
+        setAdding(false);
+        return;
+      }
       await updateHistoryStatus({
         id: review.historyId,
         status: "added_to_excel",
-        excel_profile_id: profileId,
+        excel_profile_id: null,
       });
       success("Извезено во Excel.");
       setReview(null);
@@ -235,7 +213,7 @@ export function Review() {
     } finally {
       setAdding(false);
     }
-  }, [review, profiles, selectedProfileId, confirmBeforeExport, addToExcelWithProfile, setReview, setScreen, success, showError]);
+  }, [review, fields, docTypeId, confirmBeforeExport, setReview, setScreen, success, showError]);
 
   const handleDelete = useCallback(async () => {
     if (!review?.fromHistory || review.historyId == null) return;
@@ -254,52 +232,31 @@ export function Review() {
   }, [review, setReview, setScreen, success, showError]);
 
   const handleAddToExcel = useCallback(async () => {
-    if (confirmBeforeExport && !window.confirm("Да го додадам во Excel?")) return;
-    const profileId = selectedProfileId ?? profiles[0]?.[0];
-    if (!profileId || !review) {
-      showError("Нема Excel профил. Оди во Поставки за да креираш.");
-      return;
-    }
-    const profile = profiles.find((p) => p[0] === profileId);
-    if (!profile) {
-      showError("Профилот не е пронајден.");
-      return;
-    }
-    const [, , excelPath, sheetName, mappingJson] = profile;
-    setAdding(true);
-    try {
-      await addToExcelWithProfile(profileId, excelPath, sheetName, mappingJson);
-      if (review.historyId != null) {
-        await updateHistoryStatus({
-          id: review.historyId,
-          status: "added_to_excel",
-          excel_profile_id: profileId,
-        });
-      }
-      success("Додадено во Excel");
-      setReview(null);
-      setScreen(review.historyId != null ? "history" : "home");
-    } catch (e) {
-      showError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAdding(false);
-    }
-  }, [
-    selectedProfileId,
-    profiles,
-    review,
-    confirmBeforeExport,
-    addToExcelWithProfile,
-    setReview,
-    setScreen,
-    success,
-    showError,
-  ]);
+    // For new scans (not from history) we route users to batch export instead of single-record Excel write.
+    if (confirmBeforeExport && !window.confirm("Да го додадеш документот во групен преглед за извоз?")) return;
+    setReview(null);
+    setScreen("batchReview");
+  }, [confirmBeforeExport, setReview, setScreen]);
 
-  const fieldWithMkLabel = (f: ExtractedField): ExtractedField => ({
-    ...f,
-    label: (FIELD_LABELS_MK[f.key as FieldKey] ?? f.label),
-  });
+  const formatHistoryTimestamp = (iso?: string): string => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      const date = d.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+      const time = d.toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      return `${date} · ${time}`;
+    } catch {
+      return iso;
+    }
+  };
 
   if (!review) {
     return (
@@ -317,170 +274,212 @@ export function Review() {
     );
   }
 
-  // History review: data fields only, no PDF/zoom, CRUD (Save, Export, Delete)
+  const pageTitle = schema ? `Преглед — ${schema.title}` : "Преглед";
+
+  const formSection = (
+    <div className={styles.fields}>
+      <h2 className={styles.fieldsTitle}>
+        {schema ? schema.title : "Податоци"}
+      </h2>
+      {(reviewWarnings.empty > 0 || reviewWarnings.lowConfidence > 0) && (
+        <p className={styles.reviewWarning}>
+          Има полиња за проверка: {reviewWarnings.empty} празни, {reviewWarnings.lowConfidence} со ниска доверба.
+        </p>
+      )}
+      {averageConfidence != null && (
+        <p className={styles.averageConfidence} title="Просек од довербата што ја враќа Azure моделот за полето (не е фиксна вредност)">
+          Просечна доверба (од моделот): {Math.round(averageConfidence * 100)}%
+        </p>
+      )}
+      {docTypeId === "smetka" ? (
+        <>
+          <div className={styles.fieldGroup}>
+            {["companyName", "companyTaxId", "taxPeriodStart", "taxPeriodEnd"].map((key) => {
+              const f = sortedDisplayFields.find((x) => x.key === key) ?? {
+                key,
+                label: key,
+                value: keyToField.get(key)?.value ?? "",
+                confidence: keyToField.get(key)?.confidence,
+              };
+              return (
+                <DataCard
+                  key={f.key}
+                  field={f}
+                  onChange={handleFieldChange}
+                  placeholderPrefix="Внеси"
+                />
+              );
+            })}
+          </div>
+          <h3 className={styles.groupTitle}>Утврдување на данок од добивка на непризнаени расходи</h3>
+          <div className={styles.taxBalanceTableWrap}>
+            <table className={styles.taxBalanceTable}>
+              <thead>
+                <tr>
+                  <th className={styles.taxBalanceSection}>Бр.</th>
+                  <th className={styles.taxBalanceDesc}>Опис</th>
+                  <th className={styles.taxBalanceConfidence}>Доверба</th>
+                  <th className={styles.taxBalanceValue}>Износ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {TAX_BALANCE_FORM_ROWS.map((row) => {
+                  const f = row.fieldKey ? keyToField.get(row.fieldKey) : undefined;
+                  const rawValue = f?.value ?? "";
+                  // Treat UI placeholders as empty (we still want 0 to show as 0).
+                  const value = rawValue === "—" ? "" : rawValue;
+                  const confidence = f?.confidence;
+                  const isLowConfidence =
+                    confidence != null && confidence < confidenceThreshold;
+                  return (
+                    <tr key={row.fieldKey ?? row.section}>
+                      <td className={styles.taxBalanceSection}>{row.section}</td>
+                      <td className={styles.taxBalanceDesc}>{row.description}</td>
+                      <td className={styles.taxBalanceConfidence}>
+                        {confidence != null ? (
+                          <span
+                            className={`${styles.taxConfidenceBadge} ${
+                              isLowConfidence ? styles.taxConfidenceLow : styles.taxConfidenceOk
+                            }`}
+                            title="Доверба од Azure моделот (не е фиксна вредност)"
+                          >
+                            {Math.round(confidence * 100)}%
+                          </span>
+                        ) : (
+                          <span className={styles.taxConfidenceMissing}>—</span>
+                        )}
+                      </td>
+                      <td className={styles.taxBalanceValue}>
+                        {row.fieldKey ? (
+                          <input
+                            type="text"
+                            value={value}
+                            onChange={(e) => handleFieldChange(row.fieldKey!, e.target.value)}
+                            className={styles.taxBalanceInput}
+                            placeholder="—"
+                          />
+                        ) : (
+                          ""
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <div className={styles.fieldGroup}>
+          {sortedDisplayFields.map((f) => (
+            <DataCard
+              key={f.key}
+              field={f}
+              onChange={handleFieldChange}
+              placeholderPrefix="Внеси"
+            />
+          ))}
+        </div>
+      )}
+      <div className={styles.actions}>
+        <button type="button" className={styles.secondary} onClick={handleCancel}>
+          {fromHistory ? "Назад кон историја" : "Откажи"}
+        </button>
+        {fromHistory && (
+          <>
+            <button
+              type="button"
+              className={styles.primary}
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? "Се зачувува…" : "Зачувај"}
+            </button>
+            <button
+              type="button"
+              className={styles.exportBtn}
+              onClick={handleExport}
+              disabled={adding}
+            >
+              {adding ? "Се извезува…" : "Извези во Excel"}
+            </button>
+            <button
+              type="button"
+              className={styles.deleteBtn}
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "…" : "Избриши"}
+            </button>
+          </>
+        )}
+        {!fromHistory && (
+          <button
+            type="button"
+            className={styles.primary}
+            onClick={handleAddToExcel}
+            disabled={adding}
+          >
+            {adding ? "Се додава…" : "Додај во Excel"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   if (fromHistory) {
-    const showProfileFields = profileDisplayFields != null && profileDisplayFields.length > 0;
     return (
       <div className={styles.page}>
         <div className={styles.header}>
-          <h1 className={styles.title}>Преглед</h1>
+          <h1 className={styles.title}>{pageTitle}</h1>
           <span className={styles.fileName}>{review.fileName}</span>
+          {review.historyCreatedAt && (
+            <span className={styles.fileMeta}>
+              Скенирано: {formatHistoryTimestamp(review.historyCreatedAt)}
+            </span>
+          )}
         </div>
         <div className={styles.layoutHistory}>
-          <div className={styles.fields}>
-            {profiles.length > 0 && (
-              <div className={styles.profileSelect}>
-                <label>Excel профил (за извоз)</label>
-                <select
-                  value={selectedProfileId ?? profiles[0]?.[0] ?? ""}
-                  onChange={(e) => setSelectedProfileId(Number(e.target.value) || null)}
-                >
-                  {profiles.map(([id, name]) => (
-                    <option key={id} value={id}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <h2 className={styles.fieldsTitle}>
-              {showProfileFields ? "Полиња за Excel" : "Извлечени податоци"}
-            </h2>
-            {schemaNotReady ? (
-              <p className={styles.loadingSchema}>Се вчитуваат колони…</p>
-            ) : showProfileFields ? (
-              <div className={styles.fieldGroup}>
-                {profileDisplayFields!.map((f: ExtractedField) => (
-                  <DataCard key={`${f.key}-${f.label}`} field={fieldWithMkLabel(f)} onChange={handleFieldChange} placeholderPrefix="Внеси" />
-                ))}
-              </div>
-            ) : (
-              groupedFields.map(({ group, fields: groupFields }: GroupedFieldItem) => (
-                <div key={group} className={styles.fieldGroup}>
-                  <h3 className={styles.groupTitle}>{GROUP_LABELS_MK[group]}</h3>
-                  {groupFields.map((f: ExtractedField) => (
-                    <DataCard key={f.key} field={fieldWithMkLabel(f)} onChange={handleFieldChange} placeholderPrefix="Внеси" />
-                  ))}
-                </div>
-              ))
-            )}
-            <div className={styles.actions}>
-              <button
-                type="button"
-                className={styles.secondary}
-                onClick={handleCancel}
-              >
-                Назад кон историја
-              </button>
-              <button
-                type="button"
-                className={styles.primary}
-                onClick={handleSave}
-                disabled={saving}
-              >
-                {saving ? "Се зачувува…" : "Зачувај"}
-              </button>
-              {profiles.length > 0 && (
-                <button
-                  type="button"
-                  className={styles.exportBtn}
-                  onClick={handleExport}
-                  disabled={adding}
-                >
-                  {adding ? "Се извезува…" : "Извези во Excel"}
-                </button>
-              )}
-              <button
-                type="button"
-                className={styles.deleteBtn}
-                onClick={handleDelete}
-                disabled={deleting}
-              >
-                {deleting ? "…" : "Избриши"}
-              </button>
-            </div>
-          </div>
+          {formSection}
         </div>
       </div>
     );
   }
 
-  // After-scan review: full layout with PDF preview, OCR, Add to Excel
-  const showProfileFields = profileDisplayFields != null && profileDisplayFields.length > 0;
   return (
-    <div className={styles.page}>
+    <div className={splitView ? `${styles.page} ${styles.pageSplit}` : styles.page}>
       <div className={styles.header}>
-        <h1 className={styles.title}>Преглед</h1>
+        <h1 className={styles.title}>{pageTitle}</h1>
         <span className={styles.fileName}>{review.fileName}</span>
       </div>
-      <div className={styles.layout}>
-        <div className={styles.previewSection}>
-          <DocumentPreview
-            filePath={review.filePath}
-            fileName={review.fileName}
+      <div className={styles.viewToggleRow}>
+        <label className={styles.viewToggleLabel}>
+          <input
+            type="checkbox"
+            checked={splitView}
+            onChange={(e) => setSplitView(e.target.checked)}
           />
-          <details className={styles.ocrDetails}>
-            <summary>OCR текст</summary>
-            <p className={styles.ocrRaw}>
-              {review.ocrResult.content
-                ? `${review.ocrResult.content.slice(0, 800)}${review.ocrResult.content.length > 800 ? "…" : ""}`
-                : "(Нема OCR текст)"}
-            </p>
-          </details>
-        </div>
-        <div className={styles.fields}>
-          {profiles.length > 0 && (
-            <div className={styles.profileSelect}>
-              <label>Excel профил</label>
-              <select
-                value={selectedProfileId ?? profiles[0]?.[0] ?? ""}
-                onChange={(e) => setSelectedProfileId(Number(e.target.value) || null)}
-              >
-                {profiles.map(([id, name]) => (
-                  <option key={id} value={id}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <h2 className={styles.fieldsTitle}>
-            {showProfileFields ? "Полиња за Excel" : "Извлечени податоци"}
-          </h2>
-          {schemaNotReady ? (
-            <p className={styles.loadingSchema}>Се вчитуваат колони…</p>
-          ) : showProfileFields ? (
-            <div className={styles.fieldGroup}>
-              {profileDisplayFields!.map((f: ExtractedField) => (
-                <DataCard key={`${f.key}-${f.label}`} field={fieldWithMkLabel(f)} onChange={handleFieldChange} placeholderPrefix="Внеси" />
-              ))}
-            </div>
-          ) : (
-            groupedFields.map(({ group, fields: groupFields }: GroupedFieldItem) => (
-              <div key={group} className={styles.fieldGroup}>
-                <h3 className={styles.groupTitle}>{GROUP_LABELS_MK[group]}</h3>
-                {groupFields.map((f: ExtractedField) => (
-                  <DataCard key={f.key} field={fieldWithMkLabel(f)} onChange={handleFieldChange} placeholderPrefix="Внеси" />
-                ))}
-              </div>
-            ))
-          )}
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.secondary}
-              onClick={handleCancel}
-            >
-              Откажи
-            </button>
-            <button
-              type="button"
-              className={styles.primary}
-              onClick={handleAddToExcel}
-              disabled={adding || profiles.length === 0}
-            >
-              {adding ? "Се додава…" : "Додај во Excel"}
-            </button>
+          <span>Подели екран (PDF + податоци)</span>
+        </label>
+      </div>
+      <div className={splitView ? styles.pageSplitContent : undefined}>
+        <div className={splitView ? styles.layoutSplit : styles.layoutStacked}>
+          <div className={splitView ? `${styles.previewSection} ${styles.scrollableCol}` : styles.previewSection}>
+            <DocumentPreview
+              filePath={review.filePath}
+              fileName={review.fileName}
+            />
+            <details className={styles.ocrDetails}>
+              <summary>OCR текст</summary>
+              <p className={styles.ocrRaw}>
+                {review.ocrResult.content
+                  ? `${review.ocrResult.content.slice(0, 800)}${review.ocrResult.content.length > 800 ? "…" : ""}`
+                  : "(Нема OCR текст)"}
+              </p>
+            </details>
+          </div>
+          <div className={splitView ? styles.scrollableCol : undefined}>
+            {formSection}
           </div>
         </div>
       </div>

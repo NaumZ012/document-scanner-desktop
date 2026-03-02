@@ -4,6 +4,7 @@ import type { FieldMapping } from "./mappingService";
 import type { ColumnMetadata } from "@/shared/types";
 import { colIndexToLetter } from "@/utils/matching";
 import { COLUMN_KEY_PREFIX, formatNumberForExcel } from "@/utils/fieldUtils";
+import { ALL_AMOUNT_KEYS } from "@/shared/constants";
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64);
@@ -74,20 +75,14 @@ export async function appendRowViaBackend(
       ? Array.from({ length: numCols }, (_, i) => colIndexToLetter(i))
       : Object.keys(mapping.columnToField);
 
-  const AMOUNT_KEYS = new Set(["net_amount", "tax_amount", "total_amount"]);
-  const row: { column: string; value: string }[] = columnsToWrite.map((colLetter, i) => {
-    let value: string;
-    if (i === 0) {
-      value = data["document_type"] ?? "Фактура";
-    } else {
-      const fieldKey = mapping.columnToField[colLetter];
-      value =
-        fieldKey != null
-          ? (data[fieldKey] ?? "")
-          : (data[`${COLUMN_KEY_PREFIX}${colLetter}`] ?? "");
-      if (fieldKey && AMOUNT_KEYS.has(fieldKey) && value.trim()) {
-        value = formatNumberForExcel(value);
-      }
+  const row: { column: string; value: string }[] = columnsToWrite.map((colLetter) => {
+    const fieldKey = mapping.columnToField[colLetter];
+    let value =
+      fieldKey != null
+        ? (data[fieldKey] ?? "")
+        : (data[`${COLUMN_KEY_PREFIX}${colLetter}`] ?? "");
+    if (fieldKey && ALL_AMOUNT_KEYS.has(fieldKey) && value.trim()) {
+      value = formatNumberForExcel(value);
     }
     return { column: colLetter, value };
   });

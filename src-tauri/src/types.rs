@@ -62,6 +62,15 @@ pub struct InvoiceData {
     pub source_file_path: Option<String>,
 }
 
+/// Result of run_ocr_invoice: parsed data + optional raw Azure result.contents[0].fields for frontend parsing/debug.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrInvoiceResult {
+    pub invoice_data: InvoiceData,
+    /// Raw result.contents[0].fields from Azure (for frontend parseAzureExtraction and debug logging).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_azure_fields: Option<serde_json::Value>,
+}
+
 /// Information about a failed scan attempt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailedScan {

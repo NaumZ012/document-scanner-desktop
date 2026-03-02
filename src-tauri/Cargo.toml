@@ -4,10 +4,15 @@ version = "0.1.0"
 description = "Invoice Scanner Desktop - OCR and Excel export"
 edition = "2021"
 rust-version = "1.70"
+default-run = "invoice-scanner"
 
 [lib]
 name = "invoice_scanner_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "dump_excel"
+path = "src/bin/dump_excel.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = ["codegen"] }
@@ -27,6 +32,7 @@ edit-xlsx = "0.4"
 chrono = "0.4"
 zip = "2.2"
 regex = "1.10"
+quick-xml = "0.36"
 base64 = "0.22"
 dirs = "5.0"
 opener = "0.8"

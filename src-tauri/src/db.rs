@@ -1,6 +1,11 @@
-use crate::models::ExcelSchema;
+use crate::models::{ExcelSchema, HeaderInfo};
+use crate::excel;
+use crate::services::excel_scanner;
 use rusqlite::{params, Connection};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -166,9 +171,12 @@ impl Db {
                 .map_err(|e| e.to_string())?;
         }
 
-        Ok(Db {
+        let db = Db {
             conn: Mutex::new(conn),
-        })
+        };
+        // Seed default profiles (4 document types) when DB has none.
+        let _ = db.seed_default_profiles_if_empty(&db_path);
+        Ok(db)
     }
 
     /// Path-based schema cache removed in migration 003; returns None so frontend falls back to analyze_excel_schema.
@@ -758,5 +766,345 @@ impl Db {
             .execute("DELETE FROM learned_mappings", [])
             .map_err(|e| e.to_string())?;
         Ok(count as u64)
+    }
+}
+
+fn norm_header(s: &str) -> String {
+    s.trim().to_lowercase()
+}
+
+fn find_repo_root_with_examples() -> Option<PathBuf> {
+    let rel = PathBuf::from("example").join("Примери за автоматизирање на процеси");
+    let mut dir = std::env::current_dir().ok()?;
+    for _ in 0..8 {
+        if dir.join(&rel).exists() {
+            return Some(dir);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+    None
+}
+
+fn build_mapping_from_headers(
+    headers: impl IntoIterator<Item = (String, String)>,
+    header_to_key: &HashMap<String, String>,
+    header_row: u32,
+) -> String {
+    let mut map = serde_json::Map::new();
+    for (column_letter, header_text) in headers {
+        let k = norm_header(&header_text);
+        if let Some(field_key) = header_to_key.get(&k) {
+            map.insert(column_letter, serde_json::Value::String(field_key.clone()));
+        }
+    }
+    map.insert(
+        "_headerRow".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(header_row)),
+    );
+    serde_json::Value::Object(map).to_string()
+}
+
+fn profile_exists_by_name(conn: &Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(1) FROM profiles WHERE name = ?",
+        params![name],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
+/// Canonical column order for РД-Данок на добивка (Даночен биланс) when the template has a merged header row.
+/// Columns A..N map to these field keys in order.
+const TAX_BALANCE_CANONICAL_COLUMNS: &[(u16, &str)] = &[
+    (0, "taxYear"),
+    (1, "companyName"),
+    (2, "companyTaxId"),
+    (3, "financialResultFromPL"),
+    (4, "nonRecognizedExpensesTotal"),
+    (5, "taxBaseBeforeReduction"),
+    (6, "taxBaseReductionTotal"),
+    (7, "taxBaseAfterReduction"),
+    (8, "calculatedProfitTax"),
+    (9, "calculatedTaxReductionTotal"),
+    (10, "calculatedTaxAfterReduction"),
+    (11, "advanceTaxPaid"),
+    (12, "overpaidCarriedForward"),
+    (13, "amountToPayOrOverpaid"),
+];
+
+fn column_index_to_letter(index: u16) -> String {
+    let mut n = index as u32;
+    let mut s = String::new();
+    loop {
+        let r = (n % 26) as u8;
+        s.insert(0, (b'A' + r) as char);
+        if n < 26 {
+            break;
+        }
+        n = n / 26 - 1;
+    }
+    s
+}
+
+impl Db {
+    /// Seed default profiles when DB has no profiles. For Даночен биланс we scan the template
+    /// to detect header row and save the full Excel schema so export matches the template exactly.
+    fn seed_default_profiles_if_empty(&self, db_path: &PathBuf) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+
+        let templates_dir = db_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("templates");
+        fs::create_dir_all(&templates_dir).map_err(|e| e.to_string())?;
+
+        let examples_root = find_repo_root_with_examples().map(|repo_root| {
+            repo_root
+                .join("example")
+                .join("Примери за автоматизирање на процеси")
+        });
+
+        // -------- Invoice template --------
+        let inv_src = examples_root
+            .as_ref()
+            .map(|r| r.join("Invoices").join("Exaple-Invoices.xlsx"));
+        let inv_dst = templates_dir.join("Invoices-Template.xlsx");
+        if let Some(inv_src) = inv_src {
+            if inv_src.exists() && !inv_dst.exists() {
+                let _ = fs::copy(&inv_src, &inv_dst);
+            }
+        }
+        if inv_dst.exists() && !profile_exists_by_name(&*conn, "Фактури — шаблон") {
+            let inv_sheet = excel::get_sheet_names(inv_dst.to_str().unwrap())?.get(0).cloned().unwrap_or_else(|| "Invoices".to_string());
+            let inv_headers = excel::get_excel_headers(inv_dst.to_str().unwrap(), &inv_sheet, 1)?;
+            let mut header_to_key: HashMap<String, String> = HashMap::new();
+            header_to_key.insert(norm_header("Тип на документ"), "document_type".to_string());
+            header_to_key.insert(norm_header("Број на документ"), "invoice_number".to_string());
+            header_to_key.insert(norm_header("Дата на документ"), "date".to_string());
+            header_to_key.insert(norm_header("Продавач"), "seller_name".to_string());
+            header_to_key.insert(norm_header("Купувач"), "buyer_name".to_string());
+            header_to_key.insert(norm_header("Опис"), "description".to_string());
+            header_to_key.insert(norm_header("Нето износ"), "net_amount".to_string());
+            header_to_key.insert(norm_header("ДДВ"), "tax_amount".to_string());
+            header_to_key.insert(norm_header("бруто износ"), "total_amount".to_string());
+            header_to_key.insert(norm_header("Бруто износ"), "total_amount".to_string());
+            let mapping = build_mapping_from_headers(
+                inv_headers.into_iter().map(|h| (h.column_letter, h.header_text)),
+                &header_to_key,
+                1,
+            );
+            conn.execute(
+                "INSERT INTO profiles (name, excel_path, sheet_name, column_mapping) VALUES (?, ?, ?, ?)",
+                params![
+                    "Фактури — шаблон",
+                    inv_dst.to_string_lossy().to_string(),
+                    inv_sheet,
+                    mapping
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        // -------- Tax balance (Даночен биланс) template --------
+        // Use the template exactly: detect header row, build column mapping from actual headers, save full schema.
+        let tax_src = examples_root.as_ref().map(|r| {
+            r.join("Даночен биланс")
+                .join("РД-Данок на добивка-2024-Example.xlsx")
+        });
+        let tax_dst = templates_dir.join("DanocenBilans-Template.xlsx");
+        if let Some(tax_src) = tax_src {
+            if tax_src.exists() && !tax_dst.exists() {
+                let _ = fs::copy(&tax_src, &tax_dst);
+            }
+        }
+        if tax_dst.exists() && !profile_exists_by_name(&*conn, "Даночен биланс — шаблон") {
+            let sheet = excel::get_sheet_names(tax_dst.to_str().unwrap())?.get(0).cloned().unwrap_or_else(|| "Sheet1".to_string());
+            let path_ref = tax_dst.as_path();
+            match excel_scanner::scan_excel_file(path_ref, &sheet) {
+                Ok((header_row, headers, last_data_row, next_free_row, total_rows, columns, row_template, file_size, file_mtime)) => {
+                    let mut header_to_key: HashMap<String, String> = HashMap::new();
+                    header_to_key.insert(norm_header("Даночна година"), "taxYear".to_string());
+                    header_to_key.insert(norm_header("Година"), "taxYear".to_string());
+                    header_to_key.insert(norm_header("Назив на компанија"), "companyName".to_string());
+                    header_to_key.insert(norm_header("Обврзник"), "companyName".to_string());
+                    header_to_key.insert(norm_header("ЕДБ на компанија"), "companyTaxId".to_string());
+                    header_to_key.insert(norm_header("ЕДБ"), "companyTaxId".to_string());
+                    header_to_key.insert(norm_header("Финансиски резултат (Биланс на успех)"), "financialResultFromPL".to_string());
+                    header_to_key.insert(norm_header("Непризнаени расходи (збир)"), "nonRecognizedExpensesTotal".to_string());
+                    header_to_key.insert(norm_header("Даночна основа (пред намалување)"), "taxBaseBeforeReduction".to_string());
+                    header_to_key.insert(norm_header("Намалување на даночна основа"), "taxBaseReductionTotal".to_string());
+                    header_to_key.insert(norm_header("Даночна основа (по намалување)"), "taxBaseAfterReduction".to_string());
+                    header_to_key.insert(norm_header("Пресметан данок на добивка"), "calculatedProfitTax".to_string());
+                    header_to_key.insert(norm_header("Намалување на пресметан данок"), "calculatedTaxReductionTotal".to_string());
+                    header_to_key.insert(norm_header("Пресметан данок (по намалување)"), "calculatedTaxAfterReduction".to_string());
+                    header_to_key.insert(norm_header("Платени аконтации"), "advanceTaxPaid".to_string());
+                    header_to_key.insert(norm_header("Повеќе платен пренесен"), "overpaidCarriedForward".to_string());
+                    header_to_key.insert(norm_header("За доплата / повеќе платено"), "amountToPayOrOverpaid".to_string());
+                    let (mapping, schema_headers, total_columns) = if headers.len() >= 14 {
+                        let mapping = build_mapping_from_headers(
+                            headers.iter().map(|h| (h.column_letter.clone(), h.text.clone())),
+                            &header_to_key,
+                            header_row,
+                        );
+                        let schema_headers: Vec<HeaderInfo> = headers.iter().map(|h| HeaderInfo {
+                            column_index: h.column_index,
+                            column_letter: h.column_letter.clone(),
+                            text: h.text.clone(),
+                        }).collect();
+                        (mapping, schema_headers, headers.len() as u16)
+                    } else {
+                        // Template has merged header row (one cell with all labels): use canonical A..N column order.
+                        let mut map = serde_json::Map::new();
+                        for (idx, key) in TAX_BALANCE_CANONICAL_COLUMNS {
+                            map.insert(column_index_to_letter(*idx), serde_json::Value::String((*key).to_string()));
+                        }
+                        map.insert("_headerRow".to_string(), serde_json::Value::Number(serde_json::Number::from(header_row)));
+                        let mapping = serde_json::Value::Object(map).to_string();
+                        let schema_headers: Vec<HeaderInfo> = TAX_BALANCE_CANONICAL_COLUMNS.iter()
+                            .map(|(idx, key)| HeaderInfo {
+                                column_index: *idx,
+                                column_letter: column_index_to_letter(*idx),
+                                text: key.to_string(),
+                            })
+                            .collect();
+                        (mapping, schema_headers, 14u16)
+                    };
+                    conn.execute(
+                        "INSERT INTO profiles (name, excel_path, sheet_name, column_mapping) VALUES (?, ?, ?, ?)",
+                        params![
+                            "Даночен биланс — шаблон",
+                            tax_dst.to_string_lossy().to_string(),
+                            sheet,
+                            mapping
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    let profile_id = conn.last_insert_rowid();
+                    let schema = ExcelSchema {
+                        header_row,
+                        first_data_row: header_row + 1,
+                        last_data_row,
+                        next_free_row,
+                        total_rows,
+                        total_columns,
+                        headers: schema_headers,
+                        columns,
+                        row_template,
+                        file_size,
+                        file_mtime,
+                    };
+                    drop(conn);
+                    self.save_excel_schema(profile_id, &schema)?;
+                    return Ok(());
+                }
+                Err(_) => {
+                    // Fallback: header row 1 if scan fails (e.g. no keyword match)
+                    let headers = excel::get_excel_headers(tax_dst.to_str().unwrap(), &sheet, 1)?;
+                    let mut header_to_key: HashMap<String, String> = HashMap::new();
+                    header_to_key.insert(norm_header("Даночна година"), "taxYear".to_string());
+                    header_to_key.insert(norm_header("Назив на компанија"), "companyName".to_string());
+                    header_to_key.insert(norm_header("ЕДБ на компанија"), "companyTaxId".to_string());
+                    header_to_key.insert(norm_header("Финансиски резултат (Биланс на успех)"), "financialResultFromPL".to_string());
+                    header_to_key.insert(norm_header("Непризнаени расходи (збир)"), "nonRecognizedExpensesTotal".to_string());
+                    header_to_key.insert(norm_header("Даночна основа (пред намалување)"), "taxBaseBeforeReduction".to_string());
+                    header_to_key.insert(norm_header("Намалување на даночна основа"), "taxBaseReductionTotal".to_string());
+                    header_to_key.insert(norm_header("Даночна основа (по намалување)"), "taxBaseAfterReduction".to_string());
+                    header_to_key.insert(norm_header("Пресметан данок на добивка"), "calculatedProfitTax".to_string());
+                    header_to_key.insert(norm_header("Намалување на пресметан данок"), "calculatedTaxReductionTotal".to_string());
+                    header_to_key.insert(norm_header("Пресметан данок (по намалување)"), "calculatedTaxAfterReduction".to_string());
+                    header_to_key.insert(norm_header("Платени аконтации"), "advanceTaxPaid".to_string());
+                    header_to_key.insert(norm_header("Повеќе платен пренесен"), "overpaidCarriedForward".to_string());
+                    header_to_key.insert(norm_header("За доплата / повеќе платено"), "amountToPayOrOverpaid".to_string());
+                    let mapping = build_mapping_from_headers(
+                        headers.into_iter().map(|h| (h.column_letter, h.header_text)),
+                        &header_to_key,
+                        1,
+                    );
+                    conn.execute(
+                        "INSERT INTO profiles (name, excel_path, sheet_name, column_mapping) VALUES (?, ?, ?, ?)",
+                        params![
+                            "Даночен биланс — шаблон",
+                            tax_dst.to_string_lossy().to_string(),
+                            sheet,
+                            mapping
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+            }
+        }
+
+    // -------- Payroll template --------
+    let payroll_src = examples_root
+        .as_ref()
+        .map(|r| r.join("Плати").join("РД-Трошоци за вработени-Example.xlsx"));
+    let payroll_dst = templates_dir.join("Plati-Template.xlsx");
+    if let Some(payroll_src) = payroll_src {
+        if payroll_src.exists() && !payroll_dst.exists() {
+            let _ = fs::copy(&payroll_src, &payroll_dst);
+        }
+    }
+        if payroll_dst.exists() && !profile_exists_by_name(&*conn, "Плати — шаблон") {
+            let sheet = excel::get_sheet_names(payroll_dst.to_str().unwrap())?.get(0).cloned().unwrap_or_else(|| "Sheet1".to_string());
+            let headers = excel::get_excel_headers(payroll_dst.to_str().unwrap(), &sheet, 1)?;
+            let mut header_to_key: HashMap<String, String> = HashMap::new();
+            header_to_key.insert(norm_header("Година"), "year".to_string());
+            header_to_key.insert(norm_header("Назив на компанија"), "companyName".to_string());
+            header_to_key.insert(norm_header("Вкупно бруто плата"), "totalGrossSalary".to_string());
+            header_to_key.insert(norm_header("Вкупно нето плата"), "totalNetSalary".to_string());
+            header_to_key.insert(norm_header("Вкупни трошоци за вработени"), "totalPayrollCost".to_string());
+            header_to_key.insert(norm_header("Опис"), "description".to_string());
+            let mapping = build_mapping_from_headers(
+                headers.into_iter().map(|h| (h.column_letter, h.header_text)),
+                &header_to_key,
+                1,
+            );
+            conn.execute(
+                "INSERT INTO profiles (name, excel_path, sheet_name, column_mapping) VALUES (?, ?, ?, ?)",
+                params![
+                    "Плати — шаблон",
+                    payroll_dst.to_string_lossy().to_string(),
+                    sheet,
+                    mapping
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        // -------- DDV template (.xlsx) --------
+        let ddv_dst = templates_dir.join("DDV-Template.xlsx");
+        if !ddv_dst.exists() {
+            let _ = excel::create_ddv_template_xlsx(ddv_dst.to_str().unwrap());
+        }
+        if ddv_dst.exists() && !profile_exists_by_name(&*conn, "ДДВ — шаблон") {
+            let sheet = "ДДВ".to_string();
+            let headers = excel::get_excel_headers(ddv_dst.to_str().unwrap(), &sheet, 1)?;
+            let mut header_to_key: HashMap<String, String> = HashMap::new();
+            header_to_key.insert(norm_header("Даночен период"), "taxPeriod".to_string());
+            header_to_key.insert(norm_header("Назив на компанија"), "companyName".to_string());
+            header_to_key.insert(norm_header("ЕДБ"), "companyTaxId".to_string());
+            header_to_key.insert(norm_header("Вкупна даночна основа"), "totalTaxBase".to_string());
+            header_to_key.insert(norm_header("Вкупен излезен ДДВ"), "totalOutputVat".to_string());
+            header_to_key.insert(norm_header("Вкупен влезен ДДВ"), "totalInputVat".to_string());
+            header_to_key.insert(norm_header("ДДВ за плаќање / поврат"), "vatPayableOrRefund".to_string());
+            header_to_key.insert(norm_header("Опис"), "description".to_string());
+            let mapping = build_mapping_from_headers(
+                headers.into_iter().map(|h| (h.column_letter, h.header_text)),
+                &header_to_key,
+                1,
+            );
+            conn.execute(
+                "INSERT INTO profiles (name, excel_path, sheet_name, column_mapping) VALUES (?, ?, ?, ?)",
+                params![
+                    "ДДВ — шаблон",
+                    ddv_dst.to_string_lossy().to_string(),
+                    sheet,
+                    mapping
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 }

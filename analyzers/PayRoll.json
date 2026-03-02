@@ -1,0 +1,111 @@
+{
+	"analyzerId": "PayRoll",
+	"description": "PayRoll OCR model",
+	"createdAt": "2026-02-25T00:45:04Z",
+	"lastModifiedAt": "2026-02-25T00:45:06Z",
+	"baseAnalyzerId": "prebuilt-document",
+	"config": {
+		"returnDetails": true,
+		"enableOcr": true,
+		"enableLayout": true,
+		"enableFormula": true,
+		"enableFigureDescription": true,
+		"enableFigureAnalysis": true,
+		"chartFormat": "chartjs",
+		"tableFormat": "html",
+		"estimateFieldSourceAndConfidence": true,
+		"enableSegment": false,
+		"omitContent": false,
+		"segmentPerPage": false,
+		"annotationFormat": "markdown"
+	},
+	"warnings": [],
+	"status": "ready",
+	"processingLocation": "geography",
+	"supportedModels": {
+		"completion": [
+			"gpt-4o",
+			"gpt-4o-mini",
+			"gpt-4.1",
+			"gpt-4.1-mini",
+			"gpt-4.1-nano"
+		],
+		"embedding": [
+			"text-embedding-3-small",
+			"text-embedding-3-large",
+			"text-embedding-ada-002"
+		]
+	},
+	"models": {
+		"completion": "gpt-4.1",
+		"embedding": "text-embedding-3-large"
+	},
+	"fieldSchema": {
+		"fields": {
+			"year": {
+				"type": "string",
+				"method": "extract",
+				"description": "Calendar year for the payroll sheet (for example '2024'), typically found in the title or header."
+			},
+			"companyName": {
+				"type": "string",
+				"method": "extract",
+				"description": "Name of the employer company whose salaries are summarized in the sheet."
+			},
+			"monthlyRows": {
+				"type": "array",
+				"method": "extract",
+				"description": "Per-month summary of payroll amounts for the row 'Пресметка на плата' with columns for 'Јануари', 'Февруари', 'Март', etc.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"month": {
+							"type": "string",
+							"description": "Month label (for example 'Јануари', 'Февруари', 'Март', ..., 'Декември')."
+						},
+						"grossSalary": {
+							"type": "number",
+							"description": "Gross salary total for the month, corresponding to the 'Бруто плата (Брутo 2)' row under that month."
+						},
+						"netSalary": {
+							"type": "number",
+							"description": "Net salary total for the month, from the 'Нето плата (11–12)' row or equivalent."
+						},
+						"personalTax": {
+							"type": "number",
+							"description": "Personal income tax on salaries for the month, for example from a row labeled 'Персонален данок' if present."
+						},
+						"employeeContributions": {
+							"type": "number",
+							"description": "Employee social contributions for the month (пензиско, здравствено, невработеност), summed from rows like 'Придонеси за ПИО', 'Придонеси за здравствено осигурување', etc., if available as a total."
+						},
+						"employerContributions": {
+							"type": "number",
+							"description": "Employer contributions or other payroll-related costs for the month, if summarized in the sheet (for example 'Работодавачки придонеси')."
+						}
+					}
+				}
+			},
+			"totalGrossSalary": {
+				"type": "number",
+				"method": "extract",
+				"description": "Total gross salary for the year (sum of all months), usually in the 'Вкупно' or 'Вкупно бруто плата' column at the far right."
+			},
+			"totalNetSalary": {
+				"type": "number",
+				"method": "extract",
+				"description": "Total net salary for the year, from the 'Вкупно нето плата за декларирање' or similar yearly total row."
+			},
+			"totalPayrollCost": {
+				"type": "number",
+				"method": "extract",
+				"description": "Overall annual cost of employees for the employer, if the sheet provides a row that aggregates gross salary plus employer contributions and other payroll costs."
+			},
+			"description": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generate a short narrative summary of the payroll for the year: mention key figures like total gross salary, total net salary, and any notable patterns (for example higher amounts in certain months). Use Macedonian terms that appear in the sheet such as 'Бруто плата', 'Нето плата', 'Персонален данок', 'Придонеси', but do not repeat the entire table."
+			}
+		}
+	}
+}

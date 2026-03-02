@@ -1,106 +1,92 @@
-import { useState, useCallback, useEffect } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { useState, useCallback } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   exportInvoicesToNewExcel,
-  appendInvoicesToExistingExcel,
-  getSheetNames,
+  exportToNewExcelWithColumns,
+  copyTemplateAndFillTaxBalance,
 } from "@/services/api";
 import { useToast } from "@/context/ToastContext";
 import type { InvoiceData } from "@/shared/types";
+import { normalizeDocumentType, getSchemaForDocumentType } from "@/shared/documentTypeSchemas";
 import styles from "./ExcelExportDialog.module.css";
 
 const MK = {
   title: "Извези во Excel",
-  modeNew: "Креирај нова датотека",
-  modeExisting: "Додај во постоечка датотека",
-  worksheetName: "Име на лист",
-  worksheetNamePlaceholder: "На пр. Invoices",
-  selectFile: "Избери Excel датотека",
-  sheet: "Лист",
-  headerRow: "Ред на наслови (1-based)",
   export: "Извези",
   cancel: "Откажи",
   exporting: "Се извезува…",
-  noFileSelected: "Избери Excel датотека за да продолжиш.",
   chooseLocation: "Избери локација за нова датотека",
+  notSupportedForType: "За Даночен биланс, овој екран поддржува извоз само кога има еден документ. Отстранете ги останатите или користете Преглед.",
 } as const;
 
 export interface ExcelExportDialogProps {
   invoices: InvoiceData[];
   onClose: () => void;
   onExportComplete: (path: string) => void;
+  /** Document type label/id from OCR (used to filter profiles). */
+  documentType?: string;
 }
 
 export function ExcelExportDialog({
   invoices,
   onClose,
   onExportComplete,
+  documentType,
 }: ExcelExportDialogProps) {
-  const { error: showError } = useToast();
-  const [mode, setMode] = useState<"new" | "existing">("new");
-  const [worksheetName, setWorksheetName] = useState("Invoices");
-  const [selectedFilePath, setSelectedFilePath] = useState("");
-  const [sheetNames, setSheetNames] = useState<string[]>([]);
-  const [selectedSheet, setSelectedSheet] = useState("");
-  const [headerRow, setHeaderRow] = useState(1);
-  const [loadingSheets, setLoadingSheets] = useState(false);
+  const { error: showError, success: showSuccess } = useToast();
   const [exporting, setExporting] = useState(false);
-
-  useEffect(() => {
-    if (mode === "existing" && selectedFilePath && sheetNames.length > 0 && !selectedSheet) {
-      setSelectedSheet(sheetNames[0]);
-    }
-  }, [mode, selectedFilePath, sheetNames, selectedSheet]);
-
-  const handleSelectFile = useCallback(async () => {
-    const selected = await open({
-      multiple: false,
-      filters: [{ name: "Excel", extensions: ["xlsx", "xls"] }],
-    });
-    if (selected && typeof selected === "string") {
-      setSelectedFilePath(selected);
-      setSelectedSheet("");
-      setLoadingSheets(true);
-      getSheetNames(selected)
-        .then((names) => {
-          setSheetNames(names);
-          if (names.length > 0) setSelectedSheet(names[0]);
-        })
-        .catch(() => setSheetNames([]))
-        .finally(() => setLoadingSheets(false));
-    }
-  }, []);
 
   const handleExport = useCallback(async () => {
     if (invoices.length === 0) return;
     setExporting(true);
     try {
-      if (mode === "new") {
-        const defaultName = `Фактури_${new Date().toISOString().slice(0, 10)}_${Date.now().toString().slice(-6)}.xlsx`;
-        const path = await save({
-          filters: [{ name: "Excel", extensions: ["xlsx"] }],
-          defaultPath: defaultName,
-          title: MK.chooseLocation,
-        });
-        if (path == null) return;
-        const savedPath = await exportInvoicesToNewExcel(
-          invoices,
-          path,
-          worksheetName.trim() || "Invoices"
-        );
+      const dt = normalizeDocumentType(documentType);
+      const defaultNameBase =
+        dt === "smetka"
+          ? "Даночен_биланс"
+          : dt === "generic"
+          ? "ДДВ"
+          : dt === "plata"
+          ? "Плати"
+          : "Фактури";
+      const defaultName = `${defaultNameBase}_${new Date().toISOString().slice(0, 10)}_${Date.now()
+        .toString()
+        .slice(-6)}.xlsx`;
+      const path = await save({
+        filters: [{ name: "Excel", extensions: ["xlsx"] }],
+        defaultPath: defaultName,
+        title: MK.chooseLocation,
+      });
+      if (path == null) return;
+
+      if (dt === "faktura") {
+        // Invoices: existing structured export (fixed column order).
+        const savedPath = await exportInvoicesToNewExcel(invoices, path, "Invoices");
         onExportComplete(savedPath);
-      } else {
-        if (!selectedFilePath.trim()) {
-          showError(MK.noFileSelected);
-          return;
-        }
-        await appendInvoicesToExistingExcel(
-          selectedFilePath,
-          selectedSheet || sheetNames[0] || "Sheet1",
-          headerRow >= 1 ? headerRow : 1,
+      } else if (dt === "generic" || dt === "plata") {
+        // ДДВ и Плати: build a fixed-column workbook from the document-type schema.
+        const schema = getSchemaForDocumentType(dt);
+        const headers = schema.fields.map((f) => f.label);
+        const columnFieldKeys = schema.fields.map((f) => f.key);
+        const savedPath = await exportToNewExcelWithColumns(
+          path,
+          schema.title,
+          headers,
+          columnFieldKeys,
           invoices
         );
-        onExportComplete(selectedFilePath);
+        onExportComplete(savedPath);
+      } else if (dt === "smetka") {
+        // Даночен биланс: support export from batch screen only when there is a single document,
+        // mirroring the behavior from Преглед (one Excel form per scan).
+        if (invoices.length !== 1) {
+          showError(MK.notSupportedForType);
+          setExporting(false);
+          return;
+        }
+        const invoice = invoices[0]!;
+        const savedPath = await copyTemplateAndFillTaxBalance(0, path, invoice);
+        onExportComplete(savedPath);
       }
       onClose();
     } catch (e) {
@@ -108,21 +94,7 @@ export function ExcelExportDialog({
     } finally {
       setExporting(false);
     }
-  }, [
-    mode,
-    invoices,
-    worksheetName,
-    selectedFilePath,
-    selectedSheet,
-    sheetNames,
-    headerRow,
-    onExportComplete,
-    onClose,
-    showError,
-  ]);
-
-  const canExport =
-    mode === "new" || (mode === "existing" && selectedFilePath && (selectedSheet || sheetNames.length === 0));
+  }, [invoices, onExportComplete, onClose, showError, documentType]);
 
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="export-dialog-title">
@@ -130,91 +102,6 @@ export function ExcelExportDialog({
         <h2 id="export-dialog-title" className={styles.title}>
           {MK.title}
         </h2>
-
-        <div className={styles.radioGroup}>
-          <label className={styles.radioLabel}>
-            <input
-              type="radio"
-              name="exportMode"
-              checked={mode === "new"}
-              onChange={() => setMode("new")}
-              className={styles.radio}
-            />
-            {MK.modeNew}
-          </label>
-          <label className={styles.radioLabel}>
-            <input
-              type="radio"
-              name="exportMode"
-              checked={mode === "existing"}
-              onChange={() => setMode("existing")}
-              className={styles.radio}
-            />
-            {MK.modeExisting}
-          </label>
-        </div>
-
-        {mode === "new" && (
-          <div className={styles.field}>
-            <label className={styles.label}>{MK.worksheetName}</label>
-            <input
-              type="text"
-              className={styles.input}
-              value={worksheetName}
-              onChange={(e) => setWorksheetName(e.target.value)}
-              placeholder={MK.worksheetNamePlaceholder}
-              aria-label={MK.worksheetName}
-            />
-          </div>
-        )}
-
-        {mode === "existing" && (
-          <>
-            <div className={styles.field}>
-              <button
-                type="button"
-                className={styles.secondaryButton}
-                onClick={handleSelectFile}
-                disabled={loadingSheets}
-              >
-                {loadingSheets ? "…" : MK.selectFile}
-              </button>
-              {selectedFilePath && (
-                <span className={styles.filePath}>
-                  {selectedFilePath.split(/[/\\]/).pop() ?? selectedFilePath}
-                </span>
-              )}
-            </div>
-            {sheetNames.length > 0 && (
-              <div className={styles.field}>
-                <label className={styles.label}>{MK.sheet}</label>
-                <select
-                  className={styles.select}
-                  value={selectedSheet}
-                  onChange={(e) => setSelectedSheet(e.target.value)}
-                  aria-label={MK.sheet}
-                >
-                  {sheetNames.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div className={styles.field}>
-              <label className={styles.label}>{MK.headerRow}</label>
-              <input
-                type="number"
-                min={1}
-                className={styles.inputNumber}
-                value={headerRow}
-                onChange={(e) => setHeaderRow(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                aria-label={MK.headerRow}
-              />
-            </div>
-          </>
-        )}
 
         <div className={styles.actions}>
           <button type="button" className={styles.secondaryButton} onClick={onClose} disabled={exporting}>
@@ -224,7 +111,7 @@ export function ExcelExportDialog({
             type="button"
             className={styles.primaryButton}
             onClick={handleExport}
-            disabled={exporting || !canExport}
+            disabled={exporting}
           >
             {exporting ? MK.exporting : MK.export}
           </button>

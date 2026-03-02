@@ -9,6 +9,7 @@ const GROUP_ORDER: (keyof typeof FIELD_GROUPS)[] = [
   "buyer",
   "amounts",
   "other",
+  "extracted",
 ];
 
 const CURRENCY_MAP: Record<string, string> = {
@@ -97,11 +98,22 @@ export function sortFieldsByData(fields: ExtractedField[]): ExtractedField[] {
   return [...filled.sort(sortByGroup), ...empty.sort(sortByGroup)];
 }
 
+/** All known keys from document/seller/buyer/amounts/other (used to assign rest to "extracted"). */
+const KNOWN_GROUP_KEYS = new Set(
+  (["document", "seller", "buyer", "amounts", "other"] as const).flatMap(
+    (g) => FIELD_GROUPS[g] as readonly string[]
+  )
+);
+
 /** Group fields for section display. Preserves field order from sorted list. */
 export function groupFieldsForDisplay(
   fields: ExtractedField[]
 ): { group: keyof typeof FIELD_GROUPS; label: string; fields: ExtractedField[] }[] {
   return GROUP_ORDER.map((group) => {
+    if (group === "extracted") {
+      const groupFields = fields.filter((f) => !KNOWN_GROUP_KEYS.has(f.key));
+      return { group, label: GROUP_LABELS[group], fields: groupFields };
+    }
     const keys = FIELD_GROUPS[group];
     const groupFields = fields.filter((f) => keys.includes(f.key as never));
     return { group, label: GROUP_LABELS[group], fields: groupFields };
@@ -117,59 +129,49 @@ export const COLUMN_KEY_PREFIX = "col_";
 const DOCUMENT_TYPE_LABEL = "Тип на документ";
 
 /**
- * Format a numeric value for display: comma as thousands separator, comma as decimal separator (European/Macedonian format).
- * Handles both "151.565,00" (European format) and "151565.00" (standard format) as input.
- * Returns formatted string like "151,565,00" (comma for both thousands and decimals)
- * If the decimal part is zero (.00), displays as whole number without decimals (e.g., "151,565")
+ * Format a numeric value for display in Macedonian style:
+ * - dot (.) as thousands separator
+ * - comma (,) as decimal separator
+ *
+ * Handles both "151.565,00" (European input) and "151565.00" / "514,327.00" as input.
+ * Returns formatted string like "151.565,00". If the decimal part is zero, shows a whole
+ * number (e.g. "151.565").
  */
 export function formatAmountForDisplay(value: string): string {
   if (!value || !value.trim()) return value;
   const cleaned = value.replace(/\s/g, "").replace(/\u00a0/g, "");
-  
-  // Check if it's European format (dot as thousands, comma as decimal): "151.565,00"
+
+  // European format (dot thousands, comma decimal): "151.565,00"
   const europeanFormat = /^\d{1,3}(\.\d{3})*(,\d{1,2})?$/.test(cleaned);
-  
-  // Check if it's already formatted with comma as thousands and period as decimal: "514,327.00"
+  // Already dot decimal, comma thousands: "514,327.00"
   const commaThousandsPeriodDecimal = /^\d{1,3}(,\d{3})*(\.\d{1,2})?$/.test(cleaned);
-  
+
   let num: number;
   if (europeanFormat) {
-    // European format: "151.565,00" -> parse as "151565.00"
     const normalized = cleaned.replace(/\./g, "").replace(",", ".");
     num = parseFloat(normalized);
   } else if (commaThousandsPeriodDecimal) {
-    // Already formatted: "514,327.00" -> parse as "514327.00" (remove comma thousands separator)
-    const normalized = cleaned.replace(/,/g, "");
-    num = parseFloat(normalized);
+    num = parseFloat(cleaned.replace(/,/g, ""));
   } else {
-    // Standard format: "151565.00" or "151565,00" or "151565"
     num = parseFloat(cleaned.replace(/,/g, "."));
   }
-  
+
   if (Number.isNaN(num)) return value;
-  
-  // Check if it's a whole number (handle floating point precision issues)
-  // Use a small epsilon to account for floating point errors (e.g., 514327.0000001 should be treated as whole)
+
   const epsilon = 0.0001;
   const remainder = Math.abs(num % 1);
   const isWholeNumber = remainder < epsilon || remainder > (1 - epsilon);
-  
+
   if (isWholeNumber) {
-    // Format as whole number without decimals (round to nearest integer to handle precision issues)
-    // Example: 514327.00 -> "514,327" (comma as thousands separator, no decimal part)
     const wholeNum = Math.round(num);
-    const intPart = Math.abs(wholeNum).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    const intPart = Math.abs(wholeNum).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
     return wholeNum < 0 ? `-${intPart}` : intPart;
-  } else {
-    // Format with comma as thousands separator and comma as decimal separator (European format)
-    // Example: 514327.33 -> "514,327,33"
-    const parts = num.toFixed(2).split(".");
-    const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    const decPart = parts[1];
-    // Remove trailing zeros from decimal part
-    const trimmedDec = decPart.replace(/0+$/, "");
-    return trimmedDec ? `${intPart},${trimmedDec}` : intPart;
   }
+  // Dot thousands, comma decimal: "514.327,33"
+  const parts = num.toFixed(2).split(".");
+  const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const decPart = parts[1].replace(/0+$/, "") || "00";
+  return `${intPart},${decPart}`;
 }
 
 /**
@@ -201,6 +203,35 @@ export function formatNumberForExcel(value: string): string {
   const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const decPart = parts[1];
   return decPart ? `${intPart}.${decPart}` : intPart;
+}
+
+/**
+ * Normalize a user-typed amount string to a canonical form with dot (.) as decimal
+ * separator and no thousands separators. Accepts both:
+ * - European style: "151.565,00"
+ * - US style: "151,565.00"
+ * - Simple forms: "151565,00" or "151565.00"
+ */
+export function normalizeAmountInput(value: string): string {
+  if (!value || !value.trim()) return value;
+  const cleaned = value.replace(/\s/g, "").replace(/\u00a0/g, "");
+
+  const europeanFormat = /^\d{1,3}(\.\d{3})*(,\d+)?$/.test(cleaned);
+  const usFormat = /^\d{1,3}(,\d{3})*(\.\d+)?$/.test(cleaned);
+
+  if (europeanFormat) {
+    // "151.565,00" -> "151565.00"
+    return cleaned.replace(/\./g, "").replace(",", ".");
+  }
+  if (usFormat) {
+    // "151,565.00" -> "151565.00"
+    return cleaned.replace(/,/g, "");
+  }
+  // Fallback: treat comma as decimal if there is no dot, otherwise keep as-is.
+  if (cleaned.includes(",") && !cleaned.includes(".")) {
+    return cleaned.replace(/,/g, ".");
+  }
+  return cleaned;
 }
 
 /**
@@ -240,7 +271,7 @@ export function buildProfileDisplayFields(
   return [
     {
       key: "document_type",
-      value: keyToValue.get("document_type") ?? "Фактура",
+      value: keyToValue.get("document_type") ?? "",
       confidence: keyToConfidence.get("document_type"),
       label: DOCUMENT_TYPE_LABEL,
     },

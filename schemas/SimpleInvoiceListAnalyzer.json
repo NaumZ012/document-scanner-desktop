@@ -1,0 +1,53 @@
+{
+  "name": "SimpleInvoiceListAnalyzer",
+  "description": "Extracts row-level data from Macedonian invoices with columns for document type, document number, date, seller, buyer, description, and amounts.",
+  "fieldSchema": {
+    "fields": {
+      "documentType": {
+        "type": "string",
+        "method": "extract",
+        "description": "Type of document, taken from the 'Тип на документ' column (for example 'Фактура', 'Авансна фактура', 'Сметка')."
+      },
+      "invoiceNumber": {
+        "type": "string",
+        "method": "extract",
+        "description": "Invoice or document number, from the 'Број на документ' column."
+      },
+      "invoiceDate": {
+        "type": "date",
+        "method": "extract",
+        "description": "Document date, from the 'Дата на документ' column. Normalize values like '6/19/2025' or '10/7/2025' into a standard date."
+      },
+      "sellerName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Seller name from the 'Продавач' column (for example 'Естра Скопско', 'ЕУРОТЕЛЕСАТС ДООЕЛ Скопје')."
+      },
+      "buyerName": {
+        "type": "string",
+        "method": "extract",
+        "description": "Buyer name from the 'Купувач' column (for example 'Плаќа потеси ДОО', 'A1 Македонија ДООЕЛ Скопје')."
+      },
+      "netAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Net amount without VAT from the 'Нето износ' column."
+      },
+      "vat18Amount": {
+        "type": "number",
+        "method": "extract",
+        "description": "VAT amount at 18% (or standard rate) from the 'ДДВ 18%' column."
+      },
+      "totalAmount": {
+        "type": "number",
+        "method": "extract",
+        "description": "Gross invoice amount (net plus VAT) from the 'Бруто износ' column."
+      },
+      "description": {
+        "type": "string",
+        "method": "generate",
+        "description": "Scan the entire document row (and any wrapped lines in the 'Опис во документ' column) and generate a clean narrative description of what is being billed, in one string. Include product or service names, rental periods, route descriptions, and surcharges such as 'Надоместок за животна средина', but ignore numeric amounts and quantities. If multiple descriptive fragments appear (for example several sentences in 'Опис во документ'), concatenate them into one continuous sentence or phrase. OUTPUT PLAIN TEXT ONLY: Do not use Markdown, code blocks, backticks, or triple-backtick fences (e.g. ```text or ```). Return raw natural-language text only."
+      }
+    }
+  }
+}

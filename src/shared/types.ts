@@ -53,6 +53,13 @@ export interface InvoiceData {
   source_file_path?: string;
 }
 
+/** Result of run_ocr_invoice: parsed data + optional raw Azure result.contents[0].fields. */
+export interface OcrInvoiceResult {
+  invoice_data: InvoiceData;
+  /** Raw result.contents[0].fields from Azure (for parseAzureExtraction and debug). */
+  raw_azure_fields?: Record<string, unknown> | null;
+}
+
 /** Information about a failed scan attempt. */
 export interface FailedScan {
   file_path: string;

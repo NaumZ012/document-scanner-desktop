@@ -1,0 +1,121 @@
+{
+	"analyzerId": "DDV",
+	"description": "DDV OCR Model",
+	"createdAt": "2026-02-25T00:46:04Z",
+	"lastModifiedAt": "2026-02-25T00:46:06Z",
+	"baseAnalyzerId": "prebuilt-document",
+	"config": {
+		"returnDetails": true,
+		"enableOcr": true,
+		"enableLayout": true,
+		"enableFormula": true,
+		"enableFigureDescription": true,
+		"enableFigureAnalysis": true,
+		"chartFormat": "chartjs",
+		"tableFormat": "html",
+		"estimateFieldSourceAndConfidence": true,
+		"enableSegment": false,
+		"omitContent": false,
+		"segmentPerPage": false,
+		"annotationFormat": "markdown"
+	},
+	"warnings": [],
+	"status": "ready",
+	"processingLocation": "geography",
+	"supportedModels": {
+		"completion": [
+			"gpt-4o",
+			"gpt-4o-mini",
+			"gpt-4.1",
+			"gpt-4.1-mini",
+			"gpt-4.1-nano"
+		],
+		"embedding": [
+			"text-embedding-3-small",
+			"text-embedding-3-large",
+			"text-embedding-ada-002"
+		]
+	},
+	"models": {
+		"completion": "gpt-4.1",
+		"embedding": "text-embedding-3-large"
+	},
+	"fieldSchema": {
+		"fields": {
+			"taxPeriod": {
+				"type": "string",
+				"method": "extract",
+				"description": "Tax period for the VAT return (for example 'јануари 2024', 'I–2024'). Look for headers above the summary table, such as 'Период' or 'Даночен период'."
+			},
+			"companyName": {
+				"type": "string",
+				"method": "extract",
+				"description": "Name of the registered VAT taxpayer. Look near the top of the form for 'Даночен обврзник', 'Фирма', or similar labels."
+			},
+			"companyTaxId": {
+				"type": "string",
+				"method": "extract",
+				"description": "Tax/VAT ID of the company, such as 'ЕДБ', 'Даночен број', 'VAT ID'."
+			},
+			"periodRows": {
+				"type": "array",
+				"method": "extract",
+				"description": "Per-period or per-month breakdown of VAT bases and tax amounts, corresponding to the green summary tables where each row is 'Јануари', 'Февруари', 'Март', etc., plus a 'Вкупно' row.",
+				"items": {
+					"type": "object",
+					"properties": {
+						"periodLabel": {
+							"type": "string",
+							"description": "Label of the period row, such as 'Јануари', 'Февруари', 'Март', or 'Вкупно'."
+						},
+						"taxBaseStandardRate": {
+							"type": "number",
+							"description": "Tax base without VAT for supplies at the general VAT rate (for example 18%). Look under columns similar to 'Даночна основа без ДДВ' associated with the general rate."
+						},
+						"vatStandardRate": {
+							"type": "number",
+							"description": "VAT amount at the general VAT rate (for example 'ДДВ')."
+						},
+						"taxBaseReducedRate": {
+							"type": "number",
+							"description": "Tax base for supplies at reduced VAT rates (for example 5%), found in columns describing 'даночна основа по повластена даночна стапка'."
+						},
+						"vatReducedRate": {
+							"type": "number",
+							"description": "VAT amount at reduced rates, if present in the DDV table."
+						},
+						"taxBaseExemptOrZero": {
+							"type": "number",
+							"description": "Tax base for exempt or 0% supplies, indicated by headers describing 'ослободен од данок', '0% ДДВ', or similar text in the right-hand columns."
+						}
+					}
+				}
+			},
+			"totalTaxBase": {
+				"type": "number",
+				"method": "extract",
+				"description": "Total taxable base without VAT for the entire period (sum of all relevant columns), usually in the 'Вкупно' row under 'Даночна основа'."
+			},
+			"totalOutputVat": {
+				"type": "number",
+				"method": "extract",
+				"description": "Total output VAT for the period (ДДВ на излезен промет), usually in the 'Вкупно' row under columns labeled 'ДДВ'."
+			},
+			"totalInputVat": {
+				"type": "number",
+				"method": "extract",
+				"description": "Total input VAT that can be deducted (ДДВ на влезен промет), taken from the relevant section of the form if present."
+			},
+			"vatPayableOrRefund": {
+				"type": "number",
+				"method": "extract",
+				"description": "Net VAT to pay or to request as refund for the period (разлика меѓу излезен и влезен ДДВ). Look for lines describing final balance such as 'ДДВ за плаќање' or 'ДДВ за враќање'."
+			},
+			"description": {
+				"type": "string",
+				"method": "generate",
+				"description": "Generate a short explanation of the VAT position for the period, mentioning the main bases and VAT totals. Refer to key Macedonian terms like 'Даночна основа без ДДВ', 'ДДВ', 'ослободен од данок', and whether there is VAT payable or refundable. Focus on narrative summary using the totals, not on listing all individual row numbers."
+			}
+		}
+	}
+}

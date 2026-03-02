@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { runOcrInvoice, addHistoryRecord } from "@/services/api";
+import { runOcrInvoice, addHistoryRecord, buildExtractedDataWithConfidence } from "@/services/api";
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
 import { invoiceDataToFields } from "@/utils/invoiceDataToFields";
@@ -50,15 +50,13 @@ export function DragDrop() {
         const invoiceData = await runOcrInvoice(filePath, docTypeForOcr);
         const fields = invoiceDataToFields(invoiceData);
         const docType = invoiceData.fields.document_type?.value ?? defaultDocumentType ?? "generic";
-        const extractedData = Object.fromEntries(
-          fields.map((f) => [f.key, f.value])
-        );
+        const extractedData = buildExtractedDataWithConfidence(fields);
         let historyId: number | null = null;
         try {
           historyId = await addHistoryRecord({
             document_type: docType,
             file_path_or_name: fileName,
-            extracted_data: extractedData,
+            extracted_data,
             status: "pending",
             folder_id: defaultFolderId ?? undefined,
           });

@@ -1,0 +1,7 @@
+{
+  "description": {
+    "type": "string",
+    "method": "generate",
+    "description": "Generate a clean narrative summary as requested below. CRITICAL: Output plain text only. You must NOT use any Markdown formatting, code blocks, backticks, or triple-backtick fences (e.g. ```text, ```json, or ```). Do not wrap the output in ``` ... ```. Return raw natural-language text only, with no formatting syntax. If you use any backticks or code fences, the output will break the application and database."
+  }
+}

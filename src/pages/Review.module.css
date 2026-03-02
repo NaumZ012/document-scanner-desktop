@@ -28,6 +28,29 @@
   color: var(--color-text-muted);
 }
 
+.fileMeta {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.viewToggleRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-md);
+}
+
+.viewToggleLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.viewToggleLabel input {
+  accent-color: var(--color-primary);
+}
+
 .emptyMessage {
   margin: 0 0 var(--space-xl);
   color: var(--color-text-muted);
@@ -42,12 +65,61 @@
 }
 
 .layoutHistory {
-  display: block;
+  display: flex;
+  flex-direction: column;
   max-width: 640px;
+  max-height: calc(100vh - 140px);
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* When page is in split view, constrain height so both columns can scroll */
+.pageSplit {
+  height: 100vh;
+  max-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pageSplitContent {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.layoutSplit {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--space-3xl);
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Scrollable columns in split view */
+.scrollableCol {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.layoutStacked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xl);
 }
 
 @media (max-width: 768px) {
-  .layout {
+  .layout,
+  .layoutSplit {
     grid-template-columns: 1fr;
   }
 }
@@ -101,9 +173,21 @@
 .fieldsTitle {
   font-size: 17px;
   font-weight: 600;
-  margin: 0 0 var(--space-xl);
+  margin: 0 0 var(--space-md);
   color: var(--color-text);
   letter-spacing: -0.02em;
+}
+
+.reviewWarning {
+  font-size: 13px;
+  margin: 0 0 var(--space-md);
+  color: var(--color-error);
+}
+
+.averageConfidence {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-xl);
 }
 
 .fieldGroup {
@@ -235,4 +319,100 @@
 .deleteBtn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Даночен биланс form table (template layout) */
+.taxBalanceTableWrap {
+  overflow-x: auto;
+  margin-bottom: var(--space-2xl);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.taxBalanceTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.taxBalanceTable th,
+.taxBalanceTable td {
+  padding: var(--space-sm) var(--space-md);
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.taxBalanceTable th {
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: var(--color-bg-soft);
+}
+
+.taxBalanceTable tbody tr:nth-child(even) {
+  background: var(--color-bg-soft);
+}
+
+.taxBalanceTable .taxBalanceSection {
+  width: 48px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.taxBalanceTable .taxBalanceDesc {
+  min-width: 200px;
+  color: var(--color-text);
+}
+
+.taxBalanceTable .taxBalanceValue {
+  width: 140px;
+  text-align: right;
+}
+
+.taxBalanceTable .taxBalanceConfidence {
+  width: 86px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.taxConfidenceBadge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.taxConfidenceOk {
+  color: #065f46;
+  background: #d1fae5;
+  border-color: #a7f3d0;
+}
+
+.taxConfidenceLow {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
+.taxConfidenceMissing {
+  color: var(--color-text-muted);
+}
+
+.taxBalanceInput {
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 14px;
+  text-align: right;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.taxBalanceInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
 }

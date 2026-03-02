@@ -16,6 +16,8 @@ interface ReviewState {
   fromHistory?: boolean;
   /** Stored status for history record (used when saving from history review) */
   status?: string;
+  /** When opened from History: original created_at timestamp for this record */
+  historyCreatedAt?: string;
 }
 
 export type Language = "mk" | "en";
@@ -25,8 +27,6 @@ interface AppContextValue {
   setScreen: (s: Screen) => void;
   review: ReviewState | null;
   setReview: (r: ReviewState | null) => void;
-  selectedProfileId: number | null;
-  setSelectedProfileId: (id: number | null) => void;
   batchInvoices: InvoiceData[] | null;
   setBatchInvoices: React.Dispatch<React.SetStateAction<InvoiceData[] | null>>;
   batchFailures: FailedScan[] | null;
@@ -47,8 +47,6 @@ interface AppContextValue {
   setDefaultFolderId: (id: number | null) => void;
   historyPageSize: number;
   setHistoryPageSize: (n: number) => void;
-  defaultProfileId: number | null;
-  setDefaultProfileId: (id: number | null) => void;
   confirmBeforeExport: boolean;
   setConfirmBeforeExport: (v: boolean) => void;
   fontSize: "small" | "medium" | "large";
@@ -67,7 +65,6 @@ const CONFIDENCE_THRESHOLD_KEY = "invoice-scanner-confidence-threshold";
 const DATE_FORMAT_KEY = "invoice-scanner-date-format";
 const DEFAULT_FOLDER_KEY = "invoice-scanner-default-folder";
 const HISTORY_PAGE_SIZE_KEY = "invoice-scanner-history-page-size";
-const DEFAULT_PROFILE_KEY = "invoice-scanner-default-profile";
 const CONFIRM_BEFORE_EXPORT_KEY = "invoice-scanner-confirm-before-export";
 const FONT_SIZE_KEY = "invoice-scanner-font-size";
 const COMPACT_MODE_KEY = "invoice-scanner-compact-mode";
@@ -147,17 +144,6 @@ function loadHistoryPageSize(): number {
   return 25;
 }
 
-function loadDefaultProfileId(): number | null {
-  try {
-    const v = localStorage.getItem(DEFAULT_PROFILE_KEY);
-    if (v != null && v !== "null") {
-      const n = parseInt(v, 10);
-      if (!isNaN(n) && n > 0) return n;
-    }
-  } catch {}
-  return null;
-}
-
 function loadConfirmBeforeExport(): boolean {
   try {
     const v = localStorage.getItem(CONFIRM_BEFORE_EXPORT_KEY);
@@ -195,7 +181,6 @@ function getResolvedTheme(pref: ThemePreference): "light" | "dark" {
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [screen, setScreen] = useState<Screen>("home");
   const [review, setReview] = useState<ReviewState | null>(null);
-  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [batchInvoices, setBatchInvoices] = useState<InvoiceData[] | null>(null);
   const [batchFailures, setBatchFailures] = useState<FailedScan[] | null>(null);
   const [theme, setThemeState] = useState<ThemePreference>(loadTheme);
@@ -264,14 +249,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  const [defaultProfileId, setDefaultProfileIdState] = useState<number | null>(loadDefaultProfileId);
-  const setDefaultProfileId = useCallback((id: number | null) => {
-    setDefaultProfileIdState(id);
-    try {
-      localStorage.setItem(DEFAULT_PROFILE_KEY, id == null ? "null" : String(id));
-    } catch {}
-  }, []);
-
   const [confirmBeforeExport, setConfirmBeforeExportState] = useState<boolean>(loadConfirmBeforeExport);
   const setConfirmBeforeExport = useCallback((v: boolean) => {
     setConfirmBeforeExportState(v);
@@ -333,8 +310,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setScreen,
         review,
         setReview,
-        selectedProfileId,
-        setSelectedProfileId,
         batchInvoices,
         setBatchInvoices,
         batchFailures,
@@ -355,8 +330,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setDefaultFolderId,
         historyPageSize,
         setHistoryPageSize,
-        defaultProfileId,
-        setDefaultProfileId,
         confirmBeforeExport,
         setConfirmBeforeExport,
         fontSize,
