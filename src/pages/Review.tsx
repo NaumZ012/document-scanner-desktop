@@ -10,8 +10,9 @@ import {
   deleteHistoryRecord,
   buildExtractedDataWithConfidence,
   exportInvoicesToNewExcel,
-  copyTemplateAndFillTaxBalance,
+  writeFileBase64,
 } from "@/services/api";
+import { exportTaxBalanceToNewTableBuffer } from "@/services/taxBalanceExportExcelJS";
 import type { ExtractedField } from "@/shared/types";
 import { getSchemaForDocumentType, normalizeDocumentType, TAX_BALANCE_FORM_ROWS } from "@/shared/documentTypeSchemas";
 import { fixDisplayValue } from "@/utils/displayFix";
@@ -83,6 +84,17 @@ export function Review() {
     return sum / withConf.length;
   }, [displayFields]);
 
+  /** True if any field is in the "very low" confidence band (≈ 0–0.2). */
+  const hasVeryLowConfidence = useMemo((): boolean => {
+    const withConf = displayFields.filter((f) => f.confidence != null);
+    if (withConf.length === 0) return false;
+    const minConf = withConf.reduce(
+      (min, f) => Math.min(min, f.confidence ?? 1),
+      1
+    );
+    return minConf >= 0 && minConf < 0.2;
+  }, [displayFields]);
+
   /** Summary of empty and low-confidence fields for user warnings. */
   const reviewWarnings = useMemo(() => {
     if (!schema) return { empty: 0, lowConfidence: 0 };
@@ -143,7 +155,7 @@ export function Review() {
     try {
       const docType = docTypeId;
       if (docType === "smetka") {
-        // Даночен биланс: copy official template and fill AOP column (D).
+        // Даночен биланс: new workbook with only the table (no logo/header). Values only to avoid Excel repair issues.
         const path = await save({
           filters: [{ name: "Excel", extensions: ["xlsx"] }],
           defaultPath: `Даночен_биланс_${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -153,6 +165,7 @@ export function Review() {
           setAdding(false);
           return;
         }
+        const savePath = path.toLowerCase().endsWith(".xlsx") ? path : `${path.replace(/\.[^.]*$/i, "")}.xlsx`;
         const invoiceData = {
           fields: Object.fromEntries(
             fields.map((f) => [
@@ -163,7 +176,8 @@ export function Review() {
             ])
           ),
         };
-        await copyTemplateAndFillTaxBalance(0, path, invoiceData);
+        const resultBase64 = await exportTaxBalanceToNewTableBuffer(invoiceData);
+        await writeFileBase64(savePath, resultBase64);
       } else if (docType === "faktura") {
         // Invoices: append single row into a new workbook with fixed Example-Invoices layout.
         const defaultName = `Фактури_${new Date().toISOString().slice(0, 10)}_${Date.now()
@@ -281,6 +295,12 @@ export function Review() {
       <h2 className={styles.fieldsTitle}>
         {schema ? schema.title : "Податоци"}
       </h2>
+      {review.maybeMultipleDocuments && (
+        <p className={styles.reviewWarning}>
+          Овој PDF изгледа содржи повеќе од една фактура. Апликацијата моментално чита само еден документ,
+          па најдобро е да го поделите PDF‑от на посебни датотеки (по една фактура) и да ги скенирате одделно.
+        </p>
+      )}
       {(reviewWarnings.empty > 0 || reviewWarnings.lowConfidence > 0) && (
         <p className={styles.reviewWarning}>
           Има полиња за проверка: {reviewWarnings.empty} празни, {reviewWarnings.lowConfidence} со ниска доверба.
@@ -289,6 +309,13 @@ export function Review() {
       {averageConfidence != null && (
         <p className={styles.averageConfidence} title="Просек од довербата што ја враќа Azure моделот за полето (не е фиксна вредност)">
           Просечна доверба (од моделот): {Math.round(averageConfidence * 100)}%
+        </p>
+      )}
+      {hasVeryLowConfidence && (
+        <p className={styles.lowConfidenceHint}>
+          Довербата е многу ниска кај некои полиња. Ова најчесто значи дека документот е заматен,
+          со ракопис / невообичаен фонт или можеби не е од овој тип. Прегледај ги внимателно
+          вредностите или пробај повторно скенирање со појасна копија.
         </p>
       )}
       {docTypeId === "smetka" ? (

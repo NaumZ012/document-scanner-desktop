@@ -4,6 +4,43 @@
   background: var(--color-bg);
 }
 
+.themeToggle {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  z-index: 60;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(14px);
+  transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease;
+}
+
+[data-theme^="light"] .themeToggle {
+  background: rgba(255, 255, 255, 0.9);
+  color: #1f2933;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+}
+
+[data-theme^="light"] .themeToggle:hover {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.themeToggle:hover {
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--color-text);
+  transform: translateY(-1px);
+}
+
 .appWithSidebar .main {
   margin-left: 80px;
 }
@@ -52,6 +89,73 @@
   gap: var(--space-xs);
   flex: 1;
   width: 100%;
+}
+
+.sidebarFooter {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.profileBlock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.profileIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-muted);
+}
+
+.profileName {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logoutBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+}
+
+.logoutBtn:hover {
+  color: var(--color-error, #f87171);
+  background: rgba(248, 113, 113, 0.1);
+  transform: scale(1.05);
+}
+
+.logoutBtn .iconWrap {
+  background: transparent;
 }
 
 .sidebarNav button {
@@ -146,6 +250,13 @@
   overflow-y: auto;
   padding: var(--space-2xl) var(--space-3xl) var(--space-3xl);
   background: var(--color-bg);
+}
+
+/* Auth/employee full-screen: no scroll, no padding — auth page has its own layout */
+.appAuth .main {
+  overflow: hidden;
+  padding: 0;
+  height: 100vh;
 }
 
 .loading {

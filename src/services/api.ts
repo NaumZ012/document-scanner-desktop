@@ -1,11 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { OcrResult, InvoiceData, OcrInvoiceResult } from "@/shared/types";
 import type { ExtractedField } from "@/shared/types";
-import {
-  parseAzureExtraction,
-  parseAzureFieldsWithConfidence,
-  parsedExtractionToInvoiceData,
-} from "@/utils/parseAzureExtraction";
+import { parseAzureExtraction, parseAzureFieldsWithConfidence } from "@/utils/parseAzureExtraction";
+import { getSupabaseClient } from "@/services/supabaseClient";
 
 /** Build extracted_data payload for history: key-value plus _confidence so the Review page can show confidence %. */
 export function buildExtractedDataWithConfidence(fields: ExtractedField[]): Record<string, unknown> {
@@ -54,38 +51,85 @@ export async function clearLearnedMappings(): Promise<number> {
 }
 
 export async function runOcr(filePath: string): Promise<OcrResult> {
-  return invoke<OcrResult>("run_ocr", { filePath });
+  const supabase = getSupabaseClient();
+  const { data } = await supabase!.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Not authenticated.");
+
+  const employeeId = (() => {
+    try {
+      const raw = sessionStorage.getItem("document-scanner-current-session-user");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { id?: string | null };
+      return parsed?.id ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  const appSessionId = (() => {
+    try {
+      return sessionStorage.getItem("document-scanner-current-app-session-id");
+    } catch {
+      return null;
+    }
+  })();
+
+  return invoke<OcrResult>("run_ocr", {
+    filePath,
+    accessToken: token,
+    employeeId,
+    appSessionId,
+  });
 }
 
 export async function runOcrInvoice(filePath: string, documentType?: string): Promise<InvoiceData> {
+  const supabase = getSupabaseClient();
+  const { data } = await supabase!.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Not authenticated.");
+
+  const employeeId = (() => {
+    try {
+      const raw = sessionStorage.getItem("document-scanner-current-session-user");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { id?: string | null };
+      return parsed?.id ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  const appSessionId = (() => {
+    try {
+      return sessionStorage.getItem("document-scanner-current-app-session-id");
+    } catch {
+      return null;
+    }
+  })();
+
   const result = await invoke<OcrInvoiceResult>("run_ocr_invoice", {
     filePath,
     documentType: documentType ?? null,
+    accessToken: token,
+    employeeId,
+    appSessionId,
   });
 
   const hasRaw = result?.raw_azure_fields != null && typeof result.raw_azure_fields === "object" && !Array.isArray(result.raw_azure_fields);
   const backendFields = result?.invoice_data?.fields ?? {};
-  const backendCount = Object.keys(backendFields).filter((k) => (backendFields[k]?.value ?? "").toString().trim() !== "").length;
-
-  // 3. Debug: always log what we received so we can see why UI is empty
-  console.log("=== OCR RESULT ===", {
-    hasRawAzureFields: hasRaw,
-    rawKeys: hasRaw ? Object.keys(result!.raw_azure_fields!) : [],
-    backendFieldCount: Object.keys(backendFields).length,
-    backendFilledCount: backendCount,
-    sampleBackend: Object.fromEntries(Object.entries(backendFields).slice(0, 5)),
-  });
-  if (hasRaw) {
-    console.log("=== RAW AZURE FIELDS ===", JSON.stringify(result!.raw_azure_fields, null, 2));
-  }
 
   // 1. Data mapping: parse raw Azure .valueString / .valueNumber / .valueDate into canonical keys
   // 2. Description sanitized inside parseAzureExtraction (strip ``` blocks)
-  const base: InvoiceData = {
+  const base: InvoiceData & { _document_count?: number } = {
     fields: { ...backendFields },
     source_file: result?.invoice_data?.source_file,
     source_file_path: result?.invoice_data?.source_file_path,
   };
+
+  // Surface Azure's multi-document hint so the UI can warn when a PDF likely
+  // contains several invoices but we only use the first one.
+  if (typeof result?.document_count === "number" && result.document_count > 1) {
+    base._document_count = result.document_count;
+  }
 
   if (hasRaw) {
     const raw = result!.raw_azure_fields as Record<string, Record<string, unknown>>;
@@ -159,7 +203,36 @@ export async function runOcrInvoice(filePath: string, documentType?: string): Pr
 }
 
 export async function batchScanInvoices(pdfPaths: string[], documentType?: string): Promise<import("@/shared/types").BatchScanResult> {
-  return invoke<import("@/shared/types").BatchScanResult>("batch_scan_invoices", { pdfPaths, documentType: documentType ?? null });
+  const supabase = getSupabaseClient();
+  const { data } = await supabase!.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Not authenticated.");
+
+  const employeeId = (() => {
+    try {
+      const raw = sessionStorage.getItem("document-scanner-current-session-user");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { id?: string | null };
+      return parsed?.id ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  const appSessionId = (() => {
+    try {
+      return sessionStorage.getItem("document-scanner-current-app-session-id");
+    } catch {
+      return null;
+    }
+  })();
+
+  return invoke<import("@/shared/types").BatchScanResult>("batch_scan_invoices", {
+    pdfPaths,
+    documentType: documentType ?? null,
+    accessToken: token,
+    employeeId,
+    appSessionId,
+  });
 }
 
 export async function exportInvoicesToExcel(
@@ -285,6 +358,14 @@ export async function getProfiles(): Promise<
   [number, string, string, string, string][]
 > {
   return invoke("get_profiles");
+}
+
+/** Preferred Plata template path and sheet name (example file when present, else app-data template). No Settings change required. */
+export async function getPlataTemplatePath(): Promise<{
+  path: string;
+  sheetName: string;
+}> {
+  return invoke("get_plata_template_path");
 }
 
 export async function saveProfile(payload: {

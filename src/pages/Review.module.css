@@ -190,6 +190,15 @@
   margin: 0 0 var(--space-xl);
 }
 
+.lowConfidenceHint {
+  font-size: 12px;
+  margin: -8px 0 var(--space-xl);
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--color-error, #b91c1c);
+  background: color-mix(in srgb, var(--color-error, #b91c1c) 8%, transparent);
+}
+
 .fieldGroup {
   margin-bottom: var(--space-2xl);
 }

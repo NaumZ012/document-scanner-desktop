@@ -1,0 +1,474 @@
+.authRoot {
+  height: 100vh;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+  overflow: hidden;
+  /* Single smooth gradient: blue glow from top-left, blue-tinted base */
+  background:
+    radial-gradient(ellipse 80% 70% at 20% 30%, rgba(59, 130, 246, 0.22), transparent 55%),
+    linear-gradient(160deg, #060d14 0%, #0a1628 45%, #050b12 100%);
+}
+
+[data-theme^="light"] .authRoot {
+  background:
+    radial-gradient(ellipse 80% 70% at 20% 30%, rgba(59, 130, 246, 0.18), transparent 55%),
+    linear-gradient(160deg, #e8eef7 0%, #d4e0f0 45%, #c5d4eb 100%);
+}
+
+[data-theme^="light"] .authRoot .brandMark {
+  color: rgba(30, 58, 138, 0.9);
+}
+
+[data-theme^="light"] .authRoot .brandTagline {
+  color: rgba(30, 41, 59, 0.95);
+}
+
+.shell {
+  width: 100%;
+  max-width: 1120px;
+  height: 100%;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.visual {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3xl);
+  background: transparent;
+}
+
+.visualInner {
+  max-width: 360px;
+  text-align: left;
+}
+
+.brandMark {
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.brandTagline {
+  margin-top: var(--space-md);
+  font-size: 1.35rem;
+  line-height: 1.8;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-4xl);
+  background: transparent;
+}
+
+.card {
+  width: 100%;
+  max-width: 500px;
+  padding: calc(var(--space-3xl) * 1.1);
+}
+
+.header {
+  margin-bottom: var(--space-xl);
+}
+
+.title {
+  margin: 0 0 var(--space-xs);
+  font-size: 2.25rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--color-text-muted);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.labelRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.label {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.inputRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.inputLikeButton {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+}
+
+.employeeOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.optionButton {
+  width: 100%;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text);
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.08s ease;
+}
+
+.optionButton:hover {
+  background: rgba(255, 255, 255, 0.07);
+  transform: translateY(-0.5px);
+}
+
+.optionButtonActive {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.7));
+  box-shadow:
+    0 0 0 1px var(--color-primary-overlay),
+    0 10px 25px rgba(15, 23, 42, 0.65);
+}
+
+[data-theme^="light"] .authRoot .optionButton {
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  box-shadow:
+    0 0 0 1px rgba(148, 163, 184, 0.7),
+    0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme^="light"] .authRoot .optionButton:hover {
+  background: #ffffff;
+}
+
+[data-theme^="light"] .authRoot .optionButtonActive {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #f9fafb;
+  box-shadow:
+    0 0 0 1px rgba(37, 99, 235, 0.7),
+    0 14px 32px rgba(30, 64, 175, 0.35);
+}
+
+.dropdownWrapper {
+  position: relative;
+  width: 100%;
+}
+
+.inputLikeButton {
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+  font-size: 1rem;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.inputLikeButton:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.inputLikeButton:focus-visible {
+  box-shadow: 0 0 0 1px var(--color-primary-overlay);
+}
+
+.dropdownMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 4px;
+  border-radius: 16px;
+  background: rgba(5, 5, 5, 0.96);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(18px);
+}
+
+.dropdownItem {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dropdownItem:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  padding-right: 76px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text);
+  font-size: 1.05rem;
+  outline: none;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+[data-theme^="light"] .authRoot .input {
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.7);
+}
+
+[data-theme^="light"] .authRoot .input::placeholder {
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.input:focus-visible {
+  box-shadow: 0 0 0 1px var(--color-primary-overlay);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.passwordToggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.passwordToggle:hover {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.error {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--color-error);
+  font-size: 0.8rem;
+}
+
+.primaryButton {
+  margin-top: var(--space-md);
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: none;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+  color: var(--color-on-primary);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.primaryButton:hover:not(:disabled) {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
+}
+
+.primaryButton:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.primaryButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  margin-top: var(--space-sm);
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.secondaryButton:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+}
+
+[data-theme^="light"] .authRoot .secondaryButton {
+  border-color: rgba(148, 163, 184, 0.8);
+  color: #475569;
+}
+
+[data-theme^="light"] .authRoot .secondaryButton:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+}
+
+.logoutButton {
+  margin-top: var(--space-md);
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  background: transparent;
+  color: var(--color-error, #f87171);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.logoutButton:hover {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+[data-theme^="light"] .authRoot .logoutButton {
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #dc2626;
+}
+
+[data-theme^="light"] .authRoot .logoutButton:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+}
+
+.modeSwitch {
+  margin-top: var(--space-md);
+  display: flex;
+  justify-content: center;
+}
+
+.modeSwitchButton {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  padding: 0;
+}
+
+.modeSwitchButton span {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.modeSwitchButton:hover span {
+  text-decoration: underline;
+}
+
+.forgotRow {
+  margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.forgotLink {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.forgotLink:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .visual {
+    display: none;
+  }
+
+  .panel {
+    padding: var(--space-2xl);
+  }
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: var(--space-xl);
+  }
+}
+

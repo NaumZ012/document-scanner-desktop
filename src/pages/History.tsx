@@ -148,6 +148,7 @@ function rowToReviewState(row: HistoryRow): {
   historyId: number;
   fromHistory: true;
   status: string;
+  historyCreatedAt: string;
 } {
   const [id, createdAt, docType, filePathOrName, extractedDataJson, rowStatus] = row;
   const filePath = filePathOrName;

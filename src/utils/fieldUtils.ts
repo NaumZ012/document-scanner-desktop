@@ -1,7 +1,6 @@
 import type { ExtractedField } from "@/shared/types";
 import type { FieldKey } from "@/shared/constants";
 import { FIELD_GROUPS, FIELD_INPUT_TYPE, GROUP_LABELS } from "@/shared/constants";
-import { colIndexToLetter } from "@/utils/matching";
 
 const GROUP_ORDER: (keyof typeof FIELD_GROUPS)[] = [
   "document",
@@ -98,20 +97,18 @@ export function sortFieldsByData(fields: ExtractedField[]): ExtractedField[] {
   return [...filled.sort(sortByGroup), ...empty.sort(sortByGroup)];
 }
 
-/** All known keys from document/seller/buyer/amounts/other (used to assign rest to "extracted"). */
-const KNOWN_GROUP_KEYS = new Set(
-  (["document", "seller", "buyer", "amounts", "other"] as const).flatMap(
-    (g) => FIELD_GROUPS[g] as readonly string[]
-  )
-);
-
 /** Group fields for section display. Preserves field order from sorted list. */
 export function groupFieldsForDisplay(
   fields: ExtractedField[]
 ): { group: keyof typeof FIELD_GROUPS; label: string; fields: ExtractedField[] }[] {
   return GROUP_ORDER.map((group) => {
     if (group === "extracted") {
-      const groupFields = fields.filter((f) => !KNOWN_GROUP_KEYS.has(f.key));
+      const knownKeys = new Set(
+        (["document", "seller", "buyer", "amounts", "other"] as const).flatMap(
+          (g) => FIELD_GROUPS[g] as readonly string[]
+        )
+      );
+      const groupFields = fields.filter((f) => !knownKeys.has(f.key));
       return { group, label: GROUP_LABELS[group], fields: groupFields };
     }
     const keys = FIELD_GROUPS[group];
@@ -119,14 +116,6 @@ export function groupFieldsForDisplay(
     return { group, label: GROUP_LABELS[group], fields: groupFields };
   }).filter((g) => g.fields.length > 0);
 }
-
-const HEADER_ROW_KEY = "_headerRow";
-const SCHEMA_HASH_KEY = "_schemaHash";
-
-/** Synthetic key prefix for Excel columns that have no semantic field mapping (e.g. col_A). */
-export const COLUMN_KEY_PREFIX = "col_";
-
-const DOCUMENT_TYPE_LABEL = "Тип на документ";
 
 /**
  * Format a numeric value for display in Macedonian style:
@@ -232,49 +221,4 @@ export function normalizeAmountInput(value: string): string {
     return cleaned.replace(/,/g, ".");
   }
   return cleaned;
-}
-
-/**
- * Build display fields from the selected Excel profile: one field per column (mapped or unmapped),
- * in Excel column order (A, B, C...), with the Excel header as label.
- * Document type (Тип на документ) is always shown first for preview/export.
- */
-export function buildProfileDisplayFields(
-  headers: string[],
-  columnMapping: Record<string, string>,
-  currentFields: ExtractedField[]
-): ExtractedField[] {
-  const keyToValue = new Map(currentFields.map((f) => [f.key, f.value]));
-  const keyToConfidence = new Map(
-    currentFields.filter((f) => f.confidence != null).map((f) => [f.key, f.confidence!])
-  );
-  const result: ExtractedField[] = [];
-  for (let i = 0; i < headers.length; i++) {
-    const colLetter = colIndexToLetter(i);
-    if (colLetter === HEADER_ROW_KEY || colLetter === SCHEMA_HASH_KEY) continue;
-    const fieldKey = columnMapping[colLetter];
-    const key = fieldKey ?? `${COLUMN_KEY_PREFIX}${colLetter}`;
-    const label = (headers[i] ?? colLetter).trim() || colLetter;
-    result.push({
-      key,
-      value: keyToValue.get(key) ?? "",
-      confidence: keyToConfidence.get(key),
-      label,
-    });
-  }
-  // Ensure document type is first in preview (Тип на документ)
-  const docTypeField = result.find((f) => f.key === "document_type");
-  const rest = result.filter((f) => f.key !== "document_type");
-  if (docTypeField) {
-    return [{ ...docTypeField, label: DOCUMENT_TYPE_LABEL }, ...rest];
-  }
-  return [
-    {
-      key: "document_type",
-      value: keyToValue.get("document_type") ?? "",
-      confidence: keyToConfidence.get("document_type"),
-      label: DOCUMENT_TYPE_LABEL,
-    },
-    ...result,
-  ];
 }

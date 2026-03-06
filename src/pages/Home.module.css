@@ -136,13 +136,31 @@
   border-radius: 12px;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease,
+    opacity 0.2s ease;
+  animation: fileItemEnter 0.25s ease-out;
 }
 
 .fileItem:hover {
   border-color: rgba(37, 99, 235, 0.35);
   background: var(--color-surface-hover);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+@keyframes fileItemEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .fileItemIcon {
@@ -346,15 +364,16 @@
 }
 
 .scanSpinner {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   border: 3px solid var(--color-border);
   border-top-color: var(--color-primary, #2563eb);
+  border-right-color: var(--color-primary, #2563eb);
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: scanSpin 0.7s linear infinite;
 }
 
-@keyframes spin {
+@keyframes scanSpin {
   to {
     transform: rotate(360deg);
   }
@@ -362,8 +381,19 @@
 
 .scanOverlayText {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 500;
   color: var(--color-text);
+  animation: scanPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes scanPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.65;
+  }
 }
 
 /* Document type choice – landing page with grid */

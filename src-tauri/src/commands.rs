@@ -153,26 +153,51 @@ pub fn open_app_data_folder(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn run_ocr(file_path: String) -> Result<crate::types::OcrResult, String> {
-    ocr::run_ocr(&file_path)
+pub fn run_ocr(
+    file_path: String,
+    access_token: String,
+    employee_id: Option<String>,
+    app_session_id: Option<String>,
+) -> Result<crate::types::OcrResult, String> {
+    ocr::run_ocr_via_edge(&file_path, &access_token, employee_id.as_deref(), app_session_id.as_deref())
 }
 
 #[tauri::command]
-pub async fn run_ocr_invoice(file_path: String, document_type: Option<String>) -> Result<crate::types::OcrInvoiceResult, String> {
+pub async fn run_ocr_invoice(
+    file_path: String,
+    document_type: Option<String>,
+    access_token: String,
+    employee_id: Option<String>,
+    app_session_id: Option<String>,
+) -> Result<crate::types::OcrInvoiceResult, String> {
     let path = file_path.clone();
     let doc_type = document_type.clone();
-    tauri::async_runtime::spawn_blocking(move || ocr::run_ocr_invoice(&path, doc_type.as_deref()))
+    let token = access_token.clone();
+    let emp = employee_id.clone();
+    let app_sess = app_session_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ocr::run_ocr_invoice_via_edge(&path, doc_type.as_deref(), &token, emp.as_deref(), app_sess.as_deref())
+    })
         .await
         .map_err(|e| e.to_string())?
 }
 
 /// Run OCR on multiple PDFs in parallel; returns both successful and failed results.
 #[tauri::command]
-pub async fn batch_scan_invoices(pdf_paths: Vec<String>, document_type: Option<String>) -> Result<BatchScanResult, String> {
+pub async fn batch_scan_invoices(
+    pdf_paths: Vec<String>,
+    document_type: Option<String>,
+    access_token: String,
+    employee_id: Option<String>,
+    app_session_id: Option<String>,
+) -> Result<BatchScanResult, String> {
     const CONCURRENCY: usize = 8;
     let mut successes = Vec::new();
     let mut failures = Vec::new();
     let doc_type = document_type.clone();
+    let token = access_token.clone();
+    let emp = employee_id.clone();
+    let app_sess = app_session_id.clone();
     
     for chunk in pdf_paths.chunks(CONCURRENCY) {
         let chunk_paths: Vec<(String, String)> = chunk
@@ -193,8 +218,11 @@ pub async fn batch_scan_invoices(pdf_paths: Vec<String>, document_type: Option<S
             .map(|(path, _)| {
                 let path = path.clone();
                 let doc_type = doc_type.clone();
+                let token = token.clone();
+                let emp = emp.clone();
+                let app_sess = app_sess.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    ocr::run_ocr_invoice(&path, doc_type.as_deref())
+                    ocr::run_ocr_invoice_via_edge(&path, doc_type.as_deref(), &token, emp.as_deref(), app_sess.as_deref())
                 })
             })
             .collect();
@@ -203,8 +231,8 @@ pub async fn batch_scan_invoices(pdf_paths: Vec<String>, document_type: Option<S
             match h.await {
                 Ok(Ok(res)) => {
                     let mut inv = res.invoice_data;
-                    // Ensure document_type is populated for batch flows when the user selected
-                    // a specific document type on the Home screen (Фактури, Даночен биланс, ДДВ, Плати).
+                    // For batch flows, always align document_type with the user's choice on Home
+                    // so invoices scanned under "Фактури" never show up as Даночен биланс, etc.
                     if let Some(ref dt) = doc_type {
                         let friendly = match dt.as_str() {
                             "smetka" => Some("Даночен биланс"),
@@ -214,20 +242,15 @@ pub async fn batch_scan_invoices(pdf_paths: Vec<String>, document_type: Option<S
                             _ => None,
                         };
                         if let Some(label) = friendly {
-                            let needs_set = inv
+                            inv
                                 .fields
-                                .get("document_type")
-                                .map(|v| v.value.trim().is_empty())
-                                .unwrap_or(true);
-                            if needs_set {
-                                inv.fields.insert(
+                                .insert(
                                     "document_type".to_string(),
                                     InvoiceFieldValue {
                                         value: label.to_string(),
                                         confidence: Some(1.0),
                                     },
                                 );
-                            }
                         }
                     }
                     inv.source_file = Some(filename.clone());
@@ -303,6 +326,7 @@ pub async fn export_to_new_excel_with_columns(
 
 /// Copy the profile's template file to dest_path and append each invoice as a row.
 /// Preserves the template's exact layout (merged headers, styling). Use this for Даночен биланс etc.
+/// For Plata (sheet "МПИН"): copy template then write each invoice into its month column (no row append).
 #[tauri::command]
 pub async fn copy_template_and_append_rows(
     state: State<'_, AppState>,
@@ -318,6 +342,31 @@ pub async fn copy_template_and_append_rows(
         let db = db.as_ref().ok_or("Database not initialized")?;
         db.get_profile_by_id(profile_id)?
     };
+
+    // Plata: copy template then write each invoice into its month column in Пресметка на плата grid.
+    if sheet_name == "МПИН" {
+        let template_path = excel_path.clone();
+        let dest = dest_path.clone();
+        let sheet = sheet_name.clone();
+        let inv = invoices;
+        tauri::async_runtime::spawn_blocking(move || {
+            fs::copy(Path::new(&template_path), Path::new(&dest)).map_err(|e| e.to_string())?;
+            for invoice in &inv {
+                let declaration_period = invoice
+                    .fields
+                    .get("declarationPeriod")
+                    .or_else(|| invoice.fields.get("taxPeriod"))
+                    .map(|v| v.value.clone())
+                    .unwrap_or_else(String::new);
+                excel::write_plata_to_template(&dest, &sheet, &declaration_period, &invoice.fields)?;
+            }
+            Ok::<(), String>(())
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        return Ok(dest_path);
+    }
+
     let schema = {
         if let Some(cached) = schema_cache::get_cached_schema(profile_id) {
             let db = state.db.lock().map_err(|e: std::sync::PoisonError<_>| e.to_string())?;
@@ -353,11 +402,17 @@ pub async fn copy_template_and_append_rows(
                     .or_else(|| column_mapping.get(&h.column_letter.to_uppercase()))
                     .map(String::from)
                     .unwrap_or_else(|| format!("col_{}", h.column_letter));
-                let value = invoice
+                let mut value = invoice
                     .fields
                     .get(&field_key)
                     .map(|v| v.value.clone())
                     .unwrap_or_default();
+                // DDV template: write month name (e.g. "Февруари") in Период column instead of full date range
+                if field_key == "taxPeriod" {
+                    if let Some(month_name) = excel::period_to_month_name_mk(&value) {
+                        value = month_name;
+                    }
+                }
                 column_values.push((h.column_letter.clone(), value));
             }
             excel::append_row_to_excel_at_row(&dest, &sheet, row, column_values)?;
@@ -391,6 +446,58 @@ fn tax_balance_example_template_path() -> Option<PathBuf> {
         dir = dir.parent()?.to_path_buf();
     }
     None
+}
+
+/// Prefer the repo example template for Плати (РД-Трошоци за вработени) so export matches the desired layout.
+fn plata_example_template_path() -> Option<PathBuf> {
+    let rel = PathBuf::from("example")
+        .join("Примери за автоматизирање на процеси")
+        .join("Плати")
+        .join("РД-Трошоци за вработени-Example.xlsx");
+    let mut dir = std::env::current_dir().ok()?;
+    for _ in 0..10 {
+        let candidate = dir.join(&rel);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+    None
+}
+
+/// Response for get_plata_template_path: path to template and sheet name to use.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlataTemplatePath {
+    pub path: String,
+    pub sheet_name: String,
+}
+
+/// Returns the preferred Plata template path and sheet name. Uses the repo example file when present,
+/// otherwise the generated Plati-Template.xlsx in app data. No Settings change required.
+#[tauri::command]
+pub fn get_plata_template_path(app: AppHandle) -> Result<PlataTemplatePath, String> {
+    if let Some(p) = plata_example_template_path() {
+        if let Some(s) = p.to_str() {
+            return Ok(PlataTemplatePath {
+                path: s.to_string(),
+                sheet_name: "Пресметка на плата".to_string(),
+            });
+        }
+    }
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let fallback = app_data.join("templates").join("Plati-Template.xlsx");
+    let path = fallback
+        .to_str()
+        .ok_or("Invalid path for Plati template")?
+        .to_string();
+    if !fallback.exists() {
+        return Err("Шаблонот за Плати не е пронајден. Потребен е примерот РД-Трошоци за вработени-Example.xlsx или генериран шаблон во Поставки.".to_string());
+    }
+    Ok(PlataTemplatePath {
+        path,
+        sheet_name: "МПИН".to_string(),
+    })
 }
 
 /// Copy the profile's template to dest_path and fill column D at the fixed rows (Даночен биланс form layout).
@@ -690,12 +797,38 @@ fn is_cache_valid(db: &Db, profile_id: i64, cached: &ExcelSchema) -> Result<bool
 }
 
 /// Fast append: use cached schema (next_free_row), write row, update cache and DB.
+/// For Plata (sheet "МПИН"): write into Пресметка на плата grid by month column instead of appending a row.
 #[tauri::command]
 pub async fn append_to_excel_fast(
     state: State<'_, AppState>,
     profile_id: i64,
     invoice_data: InvoiceData,
 ) -> Result<i64, String> {
+    let (excel_path, sheet_name, _column_mapping_json): (String, String, String) = {
+        let db = state.db.lock().map_err(|e: std::sync::PoisonError<_>| e.to_string())?;
+        let db = db.as_ref().ok_or("Database not initialized")?;
+        db.get_profile_by_id(profile_id)?
+    };
+
+    // Plata: write into month column of Пресметка на плата template (no row append).
+    if sheet_name == "МПИН" {
+        let declaration_period = invoice_data
+            .fields
+            .get("declarationPeriod")
+            .or_else(|| invoice_data.fields.get("taxPeriod"))
+            .map(|v| v.value.clone())
+            .unwrap_or_else(String::new);
+        let path = excel_path.clone();
+        let sheet = sheet_name.clone();
+        let fields = invoice_data.fields.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            excel::write_plata_to_template(&path, &sheet, &declaration_period, &fields)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        return Ok(0);
+    }
+
     let schema = {
         if let Some(cached) = schema_cache::get_cached_schema(profile_id) {
             let db = state.db.lock().map_err(|e: std::sync::PoisonError<_>| e.to_string())?;
@@ -736,11 +869,17 @@ pub async fn append_to_excel_fast(
             .or_else(|| column_mapping.get(&h.column_letter.to_uppercase()))
             .map(String::from)
             .unwrap_or_else(|| format!("col_{}", h.column_letter));
-        let value = invoice_data
+        let mut value = invoice_data
             .fields
             .get(&field_key)
             .map(|v| v.value.clone())
             .unwrap_or_else(String::new);
+        // DDV template: write month name (e.g. "Февруари") in Период column instead of full date range
+        if field_key == "taxPeriod" {
+            if let Some(month_name) = excel::period_to_month_name_mk(&value) {
+                value = month_name;
+            }
+        }
         column_values.push((h.column_letter.clone(), value));
     }
 

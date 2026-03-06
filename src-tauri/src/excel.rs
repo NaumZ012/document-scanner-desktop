@@ -430,6 +430,210 @@ pub fn append_row_to_excel_at_row(
             format!("Cannot write to file: {}", msg)
         }
     })?;
+    strip_drawings_from_xlsx(path).map_err(|e| format!("Could not strip drawings: {}", e))?;
+    Ok(())
+}
+
+/// Parse declaration period string (e.g. "05/2025", "5/2025", "05.2025") to month 1–12. Returns None if unparseable.
+fn parse_plata_month(declaration_period: &str) -> Option<u32> {
+    let s = declaration_period.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // "05/2025" or "5/2025"
+    if let Some(slash) = s.find('/') {
+        let month_str = s[..slash].trim();
+        if let Ok(m) = month_str.parse::<u32>() {
+            if (1..=12).contains(&m) {
+                return Some(m);
+            }
+        }
+    }
+    // "05.2025" or "5.2025"
+    if let Some(dot) = s.find('.') {
+        let month_str = s[..dot].trim();
+        if let Ok(m) = month_str.parse::<u32>() {
+            if (1..=12).contains(&m) {
+                return Some(m);
+            }
+        }
+    }
+    // "2025-05"
+    if s.len() >= 7 && s.chars().nth(4) == Some('-') {
+        if let Ok(m) = s[5..7].trim().parse::<u32>() {
+            if (1..=12).contains(&m) {
+                return Some(m);
+            }
+        }
+    }
+    None
+}
+
+/// Parse tax period or date string (e.g. "01/03/2024 - 31/03/2024", "01.03.2024", "03/2024") and return
+/// only the month as two digits "01".."12" for use in DDV template Период column. Returns None if unparseable.
+pub fn period_to_month_only(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Take first part if range: "01/03/2024 - 31/03/2024" -> "01/03/2024"
+    let first = s.split('-').next().map(str::trim).unwrap_or(s);
+    let first = first.trim_end_matches(|c: char| c == '-' || c == ' ');
+
+    // DD/MM/YYYY or D/M/YYYY
+    if let Some(slash1) = first.find('/') {
+        let after_first = first[slash1 + 1..].trim_start();
+        if let Some(slash2) = after_first.find('/') {
+            let month_str = after_first[..slash2].trim();
+            if let Ok(m) = month_str.parse::<u32>() {
+                if (1..=12).contains(&m) {
+                    return Some(format!("{:02}", m));
+                }
+            }
+        } else {
+            // "03/2024" style
+            let month_str = first[..slash1].trim();
+            if let Ok(m) = month_str.parse::<u32>() {
+                if (1..=12).contains(&m) {
+                    return Some(format!("{:02}", m));
+                }
+            }
+        }
+    }
+    // DD.MM.YYYY or D.M.YYYY
+    if let Some(dot1) = first.find('.') {
+        let after_first = first[dot1 + 1..].trim_start();
+        if let Some(dot2) = after_first.find('.') {
+            let month_str = after_first[..dot2].trim();
+            if let Ok(m) = month_str.parse::<u32>() {
+                if (1..=12).contains(&m) {
+                    return Some(format!("{:02}", m));
+                }
+            }
+        }
+    }
+    // YYYY-MM-DD
+    if first.len() >= 7 && first.chars().nth(4) == Some('-') {
+        if let Ok(m) = first[5..7].trim().parse::<u32>() {
+            if (1..=12).contains(&m) {
+                return Some(format!("{:02}", m));
+            }
+        }
+    }
+    None
+}
+
+/// Parse tax period or date string and return Macedonian month name ("Јануари".."Декември") for DDV template.
+/// Examples:
+/// - "01/02/2024 - 29/02/2024" -> "Февруари"
+/// - "01.03.2024" -> "Март"
+/// - "2024-12-01" -> "Декември"
+pub fn period_to_month_name_mk(s: &str) -> Option<String> {
+    const MK_MONTHS: [&str; 12] = [
+        "Јануари",
+        "Февруари",
+        "Март",
+        "Април",
+        "Мај",
+        "Јуни",
+        "Јули",
+        "Август",
+        "Септември",
+        "Октомври",
+        "Ноември",
+        "Декември",
+    ];
+    let mm = period_to_month_only(s)?;
+    let m = mm.parse::<usize>().ok()?;
+    if !(1..=12).contains(&m) {
+        return None;
+    }
+    Some(MK_MONTHS[m - 1].to_string())
+}
+
+/// Row numbers (1-based) in Пресметка на плата template: title row 1, months row 2, data 3–13, declaration 15–18, employee 21–22, tax 25–27.
+const PLATA_ROW_BRUTO: u32 = 3;
+const PLATA_ROW_PIO: u32 = 4;
+const PLATA_ROW_HEALTH: u32 = 5;
+const PLATA_ROW_PROF: u32 = 6;
+const PLATA_ROW_VRABOTUVANJE: u32 = 7;
+const PLATA_ROW_EXEMPTION: u32 = 10;
+const PLATA_ROW_PERSONAL_TAX: u32 = 12;
+const PLATA_ROW_DECLARATION_NET: u32 = 15;
+const PLATA_ROW_EMPLOYEE_COUNT: u32 = 21;
+
+/// Write payroll data into the Пресметка на плата grid by month column.
+/// Month from declarationPeriod (e.g. "02/2024") → column: F=Jan(01), G=Feb(02), …, Q=Dec(12).
+/// OCR JSON → rows: brutoPlata→3, pridonesPIO→4, pridonesZdravstvo→5, pridonesProfesionalnoZaboluvanje→6,
+/// pridonesVrabotuvanje→7, personalenDanok→12, vkupnaNetoPlata→15, brojVraboteni→21.
+pub fn write_plata_to_template(
+    path: &str,
+    sheet_name: &str,
+    declaration_period: &str,
+    fields: &std::collections::HashMap<String, crate::types::InvoiceFieldValue>,
+) -> Result<(), String> {
+    let month = parse_plata_month(declaration_period)
+        .ok_or_else(|| format!("Could not parse declaration period '{}' (use MM/YYYY e.g. 05/2025)", declaration_period))?;
+    let col_letter = col_index_to_letter(5 + (month - 1)); // F=Jan (01), G=Feb (02), …, Q=Dec (12)
+
+    let get = |key: &str| {
+        fields
+            .get(key)
+            .map(|v| v.value.trim().to_string())
+            .unwrap_or_default()
+    };
+
+    let path = Path::new(path);
+    if !path.exists() {
+        return Err("File not found. Browse to select again.".to_string());
+    }
+    let mut workbook = edit_xlsx::Workbook::from_path(path).map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("Could not open") || msg.contains("permission") || msg.contains("Permission") {
+            "Please close the file in Excel first.".to_string()
+        } else {
+            format!("Could not open Excel file: {}", msg)
+        }
+    })?;
+    let worksheet = workbook
+        .get_worksheet_mut_by_name(sheet_name)
+        .map_err(|e| format!("Sheet not found: {}", e))?;
+    let format = data_cell_format();
+
+    let mut write_cell = |row: u32, value: &str| -> Result<(), String> {
+        if value.is_empty() {
+            return Ok(());
+        }
+        let cell_ref = format!("{}{}", col_letter, row);
+        worksheet
+            .write_string_with_format(&cell_ref, sanitize_cell(value), &format)
+            .map_err(|e| e.to_string())
+    };
+
+    let bruto = get("brutoPlata");
+    let bruto_val = if !bruto.is_empty() { bruto } else { get("totalGrossSalary") };
+    write_cell(PLATA_ROW_BRUTO, &bruto_val)?;
+    write_cell(PLATA_ROW_PIO, &get("pridonesPIO"))?;
+    write_cell(PLATA_ROW_HEALTH, &get("pridonesZdravstvo"))?;
+    write_cell(PLATA_ROW_PROF, &get("pridonesProfesionalnoZaboluvanje"))?;
+    write_cell(PLATA_ROW_VRABOTUVANJE, &get("pridonesVrabotuvanje"))?;
+    let exempt = get("taxExemption");
+    let exempt_val = if !exempt.is_empty() { exempt } else { get("даночно ослободување") };
+    write_cell(PLATA_ROW_EXEMPTION, &exempt_val)?;
+    write_cell(PLATA_ROW_PERSONAL_TAX, &get("personalenDanok"))?;
+    let net = get("vkupnaNetoPlata");
+    let net_val = if !net.is_empty() { net } else { get("totalNetSalary") };
+    write_cell(PLATA_ROW_DECLARATION_NET, &net_val)?;
+    write_cell(PLATA_ROW_EMPLOYEE_COUNT, &get("brojVraboteni"))?;
+
+    workbook.save_as(path).map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("Permission denied") || msg.contains("being used") {
+            "Please close the file in Excel first.".to_string()
+        } else {
+            format!("Cannot write to file: {}", msg)
+        }
+    })?;
 
     strip_drawings_from_xlsx(path).map_err(|e| format!("Could not strip drawings: {}", e))?;
     Ok(())
@@ -1161,6 +1365,35 @@ fn is_amount_field(key: &str) -> bool {
             | "totalGrossSalary"
             | "totalNetSalary"
             | "totalPayrollCost"
+            // Plata (payroll) schema numeric fields
+            | "brojVraboteni"
+            | "brutoPlata"
+            | "pridonesPIO"
+            | "pridonesZdravstvo"
+            | "pridonesProfesionalnoZaboluvanje"
+            | "pridonesVrabotuvanje"
+            | "personalenDanok"
+            | "vkupnaNetoPlata"
+            // DDV box fields (01–19: основа/ДДВ and single numeric columns)
+            | "prometOpshtaStapkaOsnova"
+            | "prometOpshtaStapkaDDV"
+            | "prometPovlastenaStapka10Osnova"
+            | "prometPovlastenaStapka10DDV"
+            | "prometPovlastenaStapka5Osnova"
+            | "prometPovlastenaStapka5DDV"
+            | "izvoz"
+            | "oslobodenSOPravoNaOdbivka"
+            | "oslobodenBezPravoNaOdbivka"
+            | "prometNerezidentiNeOdanocliv"
+            | "prometPrenesuvanjeDanocnaObvrska"
+            | "primenPrometNerezidentiOpshtaOsnova"
+            | "primenPrometNerezidentiOpshtaDDV"
+            | "primenPrometNerezidentiPovlastenaOsnova"
+            | "primenPrometNerezidentiPovlastenaDDV"
+            | "primenPrometZemjaOpshtaOsnova"
+            | "primenPrometZemjaOpshtaDDV"
+            | "primenPrometZemjaPovlastenaOsnova"
+            | "primenPrometZemjaPovlastenaDDV"
     )
 }
 
@@ -1212,23 +1445,35 @@ pub fn export_to_new_excel_with_columns(
     for (row_idx, inv) in invoices.iter().enumerate() {
         let row = (row_idx + 1) as u32;
         for (col_idx, field_key) in column_field_keys.iter().enumerate() {
-            let value = inv
-                .fields
-                .get(field_key)
-                .map(|f| f.value.as_str())
-                .unwrap_or("");
-            if is_amount_field(field_key) {
+            // rowOrder is 1-based row index (matches РД-ДДВ "Ред." column).
+            let (mut value, is_number) = if field_key == "rowOrder" {
+                ((row_idx + 1).to_string(), true)
+            } else {
+                let v = inv
+                    .fields
+                    .get(field_key)
+                    .map(|f| f.value.as_str())
+                    .unwrap_or("");
+                (v.to_string(), is_amount_field(field_key))
+            };
+            // DDV export (screen export): write Macedonian month name in Период instead of full date/range.
+            if !is_number && worksheet_name == "ДДВ" && field_key == "taxPeriod" {
+                if let Some(month_name) = period_to_month_name_mk(&value) {
+                    value = month_name;
+                }
+            }
+            if is_number {
                 write_number_cell_safe(
                     worksheet,
                     row,
                     col_idx as u16,
-                    value,
+                    &value,
                     &amount_format_wrap,
                     &text_format_wrap,
                 )
                 .map_err(|e: XlsxError| e.to_string())?;
             } else {
-                write_text_cell_safe(worksheet, row, col_idx as u16, value, &text_format_wrap)
+                write_text_cell_safe(worksheet, row, col_idx as u16, &value, &text_format_wrap)
                     .map_err(|e: XlsxError| e.to_string())?;
             }
         }
@@ -1239,8 +1484,52 @@ pub fn export_to_new_excel_with_columns(
     Ok(path_str)
 }
 
-/// Create a minimal DDV (VAT return) Excel template (.xlsx) for export.
-/// The legacy provided template is .XLS, which cannot be appended to with edit_xlsx.
+/// DDV (РД-ДДВ) template – exact official sub-headers (row that defines each column). Matches РД-ДДВ-Example.xlsx.
+/// Columns: Период, 1–19 (Даночна основа без ДДВ/ДДВ or full text), Вкупно, Реф.
+const DDV_TEMPLATE_HEADERS: [&str; 22] = [
+    "Период",
+    "Даночна основа без ДДВ",
+    "ДДВ",
+    "Даночна основа без ДДВ",
+    "ДДВ",
+    "Даночна основа без ДДВ",
+    "ДДВ",
+    "Извоз",
+    "Промет ослободен од данок со право на одбивка на претходен данок",
+    "Промет ослободен од данок без право на одбивка на претходен данок",
+    "Промет извршен спрема даночни обврзници кои немаат седиште во земјата, кој не е предмет на оданочување во земјата",
+    "Промет во земјата за кој данокот го пресметува примателот на прометот (пренесување на даночна обврска согласно член 32-а)",
+    "Даночна основа без ДДВ",
+    "ДДВ",
+    "Даночна основа без ДДВ",
+    "ДДВ",
+    "Даночна основа без ДДВ",
+    "ДДВ",
+    "Даночна основа без ДДВ",
+    "ДДВ",
+    "Вкупно",
+    "Реф.",
+];
+
+/// Month labels and total row for РД-ДДВ (data block rows 5–18 in official template).
+const DDV_PERIOD_ROW_LABELS: [&str; 13] = [
+    "Јануари",
+    "Февруари",
+    "Март",
+    "Април",
+    "Мај",
+    "Јуни",
+    "Јули",
+    "Август",
+    "Септември",
+    "Октомври",
+    "Ноември",
+    "Декември",
+    "Вкупно",
+];
+
+/// Create a DDV (VAT return) Excel template matching РД-ДДВ-Example.xlsx: exact headers, period rows, Вкупно formula.
+/// Formula for column 20 (Вкупно): =(2+4+6+13+15+17+19) → sum of VAT columns B,D,F,M,O,Q,S.
 pub fn create_ddv_template_xlsx(path: &str) -> Result<(), String> {
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
@@ -1250,38 +1539,297 @@ pub fn create_ddv_template_xlsx(path: &str) -> Result<(), String> {
 
     let header_format = Format::new()
         .set_bold()
-        .set_background_color(rust_xlsxwriter::Color::RGB(0x2563EB))
-        .set_font_color(rust_xlsxwriter::Color::RGB(0xFFFFFF));
+        .set_background_color(rust_xlsxwriter::Color::RGB(0xE0E0E0))
+        .set_text_wrap();
     let text_format_wrap = Format::new().set_text_wrap();
 
-    // Reasonable defaults for readability
-    let widths: [f64; 8] = [18.0, 28.0, 16.0, 22.0, 20.0, 20.0, 24.0, 40.0];
-    for (col, w) in widths.iter().enumerate() {
-        let _ = worksheet.set_column_width(col as u16, *w);
+    const COL_WIDTH: f64 = 16.0;
+    for col in 0..DDV_TEMPLATE_HEADERS.len() {
+        let _ = worksheet.set_column_width(col as u16, COL_WIDTH);
     }
 
-    let headers: [&str; 8] = [
-        "Даночен период",
-        "Назив на компанија",
-        "ЕДБ",
-        "Вкупна даночна основа",
-        "Вкупен излезен ДДВ",
-        "Вкупен влезен ДДВ",
-        "ДДВ за плаќање / поврат",
-        "Опис",
-    ];
-    for (col, header) in headers.iter().enumerate() {
+    for (col, header) in DDV_TEMPLATE_HEADERS.iter().enumerate() {
         write_text_cell_safe(worksheet, 0, col as u16, header, &header_format)
             .map_err(|e: XlsxError| e.to_string())?;
     }
 
-    // Keep a blank first data row with wrap enabled, so appended rows look consistent.
-    for col in 0..headers.len() {
-        let _ = worksheet.write_string_with_format(1, col as u16, "", &text_format_wrap);
+    for (row_idx, period_label) in DDV_PERIOD_ROW_LABELS.iter().enumerate() {
+        let row = (row_idx + 1) as u32;
+        worksheet
+            .write_string_with_format(row, 0, *period_label, &text_format_wrap)
+            .map_err(|e: XlsxError| e.to_string())?;
+        for col in 1..20u16 {
+            let _ = worksheet.write_string_with_format(row, col, "", &text_format_wrap);
+        }
+        let excel_row = row + 1u32;
+        let formula = format!(
+            "=B{}+D{}+F{}+M{}+O{}+Q{}+S{}",
+            excel_row, excel_row, excel_row, excel_row, excel_row, excel_row, excel_row
+        );
+        worksheet
+            .write_formula(row, 20, formula.as_str())
+            .map_err(|e: XlsxError| e.to_string())?;
+        let _ = worksheet.write_string_with_format(row, 21, "", &text_format_wrap);
     }
 
+    let _ = worksheet.set_freeze_panes(1, 0);
     workbook
         .save(path)
         .map_err(|e: XlsxError| e.to_string())?;
+    Ok(())
+}
+
+// --- Plata (РД-Трошоци за вработени) templates ---
+
+/// Simple table layout for Plata export: one header row (A1–K1), one data row per document.
+/// Matches user image: dark blue header, white bold centered; columns = Company, EDB, Period, Count, Bruto, PIO, Health, Prof, Employment, Personal tax, Net.
+const PLATA_SIMPLE_HEADERS: [&str; 11] = [
+    "Назив на компанија",
+    "ЕДБ",
+    "Даночен период (м)",
+    "Број на осигурени лица",
+    "Бруто плата (Бруто)",
+    "Придонес за ПИО",
+    "Придонес за здравство",
+    "Придонес за профес.",
+    "Придонес за вработ.",
+    "Персонален данок",
+    "Вкупна нето плата",
+];
+
+/// Create the simple Plata export template: sheet "Плати", row 1 = headers A1–K1 (dark blue bg, white bold centered).
+/// Data rows are appended on export (one row per document). Structure and formatting match user image.
+pub fn create_plata_simple_table_xlsx(path: &str) -> Result<(), String> {
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet
+        .set_name("Плати")
+        .map_err(|e: XlsxError| e.to_string())?;
+
+    let header_fmt = Format::new()
+        .set_bold()
+        .set_text_wrap()
+        .set_align(FormatAlign::Center)
+        .set_align(FormatAlign::VerticalCenter)
+        .set_background_color(rust_xlsxwriter::Color::RGB(0x1E3A5F))
+        .set_font_color(rust_xlsxwriter::Color::RGB(0xFFFFFF));
+
+    let col_widths = [22.0, 16.0, 14.0, 12.0, 18.0, 14.0, 14.0, 12.0, 12.0, 16.0, 16.0];
+    for (col, &header) in PLATA_SIMPLE_HEADERS.iter().enumerate() {
+        let w = col_widths.get(col).copied().unwrap_or(18.0);
+        worksheet
+            .set_column_width(col as u16, w)
+            .map_err(|e: XlsxError| e.to_string())?;
+        worksheet
+            .write_string_with_format(0, col as u16, header, &header_fmt)
+            .map_err(|e: XlsxError| e.to_string())?;
+    }
+    worksheet.set_row_height(0, 24.0).map_err(|e: XlsxError| e.to_string())?;
+
+    let _ = worksheet.set_freeze_panes(1, 0);
+    workbook
+        .save(path)
+        .map_err(|e: XlsxError| e.to_string())?;
+    Ok(())
+}
+
+/// Month column headers for payroll (Пресметка на плата). Must match example file exactly.
+const PLATA_MONTH_HEADERS: [&str; 12] = [
+    "Јануари",
+    "Фебруари",
+    "Март",
+    "Април",
+    "Мај",
+    "Јуни",
+    "Јули",
+    "Август",
+    "Септември",
+    "Октомври",
+    "Ноември",
+    "Декември",
+];
+
+/// Payroll section layout (match screenshot): A = row#, B = label, C = %, F–Q = months (F=Jan).
+fn write_plata_main_section(
+    worksheet: &mut Worksheet,
+    start_row: u32,
+    _header_fmt: &Format,
+    cell_fmt: &Format,
+    pct_fmt: &Format,
+    light_blue_fmt: &Format,
+) -> Result<(), XlsxError> {
+    let rows: [(&str, &str); 11] = [
+        ("Бруто плата (Бруто 2)", ""),
+        ("Придонес за ПИО", "18.80%"),
+        ("Придонес за здравство", "7.50%"),
+        ("Придонес за профес. здравствено осигурување", "0.50%"),
+        ("Придонес за вработување", "1.20%"),
+        ("Вкупни придонеси (2+3+4+5)", "28.00%"),
+        ("Бруто основа (Бруто 1) (1-6)", ""),
+        ("Даночно ослободување", ""),
+        ("Вкупна даночна основа (7-8)", ""),
+        ("Персонален данок", "10.00%"),
+        ("Нето плата (7-11)", ""),
+    ];
+    const COL_LABEL: u16 = 1;   // B (row labels)
+    const COL_PCT: u16 = 2;    // C (percentage)
+    let month_start_col: u16 = 5;  // F (January)
+    let month_end_col: u16 = 16;    // Q (December)
+
+    for (i, (label, pct)) in rows.iter().enumerate() {
+        let r = start_row + i as u32;
+        // Highlight only summary rows: Вкупни придонеси (5), Вкупна даночна основа (8), Нето плата (10)
+        let fmt = if i == 5 || i == 8 || i == 10 {
+            light_blue_fmt
+        } else {
+            cell_fmt
+        };
+        worksheet.write_number_with_format(r, 0, (i + 1) as u32, fmt)?;
+        worksheet.write_string_with_format(r, COL_LABEL, *label, fmt)?;
+        if !pct.is_empty() {
+            worksheet.write_string_with_format(r, COL_PCT, *pct, pct_fmt)?;
+        }
+        // Do not write empty string to formula rows (5,6,9,10) so formulas are preserved
+        for col in month_start_col..=month_end_col {
+            if i != 5 && i != 6 && i != 9 && i != 10 {
+                let _ = worksheet.write_string_with_format(r, col, "", fmt);
+            }
+        }
+    }
+    let excel_base = start_row + 1; // first data row Excel 1-based (e.g. 3)
+    for col_idx in 0..12u32 {
+        let col = col_idx + 5; // F=5 .. Q=16
+        let l = col_index_to_letter(col);
+        // Row 8: Вкупни придонеси = K4+K5+K6+K7
+        let formula_row8 = format!(
+            "={}{}+{}{}+{}{}+{}{}",
+            l, excel_base + 1, l, excel_base + 2, l, excel_base + 3, l, excel_base + 4
+        );
+        worksheet.write_formula(start_row + 5, col as u16, formula_row8.as_str())?;
+        // Row 9: Бруто основа = row3 - row8
+        let formula_row9 = format!("={}{}-{}{}", l, excel_base, l, excel_base + 5);
+        worksheet.write_formula(start_row + 6, col as u16, formula_row9.as_str())?;
+        // Row 12: Вкупна даночна основа = row9 - row10
+        let formula_row12 = format!("={}{}-{}{}", l, excel_base + 6, l, excel_base + 7);
+        worksheet.write_formula(start_row + 9, col as u16, formula_row12.as_str())?;
+        // Row 13: Нето плата = row9 - row12
+        let formula_row13 = format!("={}{}-{}{}", l, excel_base + 6, l, excel_base + 9);
+        worksheet.write_formula(start_row + 10, col as u16, formula_row13.as_str())?;
+    }
+    Ok(())
+}
+
+/// Create Plata template: "just the table" — no metadata. Row 1 = title, row 2 = months, rows 3–13 = main table, 15–18 declaration, 21–22 employee, 25–27 tax.
+pub fn create_plata_template_xlsx(path: &str) -> Result<(), String> {
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet
+        .set_name("МПИН")
+        .map_err(|e: XlsxError| e.to_string())?;
+
+    let title_fmt = Format::new()
+        .set_bold()
+        .set_align(FormatAlign::Center)
+        .set_background_color(rust_xlsxwriter::Color::RGB(0xCC6600))
+        .set_font_color(rust_xlsxwriter::Color::RGB(0xFFFFFF));
+    let month_header_fmt = Format::new()
+        .set_bold()
+        .set_text_wrap()
+        .set_align(FormatAlign::Center)
+        .set_background_color(rust_xlsxwriter::Color::RGB(0x1E3A5F))
+        .set_font_color(rust_xlsxwriter::Color::RGB(0xFFFFFF));
+    let header_fmt = Format::new().set_bold().set_text_wrap();
+    let cell_fmt = Format::new().set_text_wrap();
+    let pct_fmt = Format::new().set_text_wrap().set_align(FormatAlign::Right);
+    let light_green_fmt = Format::new()
+        .set_text_wrap()
+        .set_background_color(rust_xlsxwriter::Color::RGB(0xC6EFCE));
+
+    worksheet.set_column_width(0, 5.0).map_err(|e: XlsxError| e.to_string())?;
+    worksheet.set_column_width(1, 42.0).map_err(|e: XlsxError| e.to_string())?; // B = labels
+    worksheet.set_column_width(2, 10.0).map_err(|e: XlsxError| e.to_string())?; // C = %
+    worksheet.set_column_width(3, 8.0).map_err(|e: XlsxError| e.to_string())?;
+    worksheet.set_column_width(4, 8.0).map_err(|e: XlsxError| e.to_string())?;
+    for col in 5..16u16 {
+        let _ = worksheet.set_column_width(col, 12.0); // F–P months
+    }
+    worksheet.set_column_width(16, 14.0).map_err(|e: XlsxError| e.to_string())?; // Q for "Декември"
+
+    // --- Row 1: merged B1:E1 "Пресметка на плата", orange ---
+    worksheet
+        .merge_range(0, 1, 0, 4, "Пресметка на плата", &title_fmt)
+        .map_err(|e: XlsxError| e.to_string())?;
+
+    // --- Row 2: C2="%", F2:Q2 = month names (F=Jan), blue ---
+    worksheet
+        .write_string_with_format(1, 2, "%", &month_header_fmt)
+        .map_err(|e: XlsxError| e.to_string())?;
+    for (col, month) in PLATA_MONTH_HEADERS.iter().enumerate() {
+        worksheet
+            .write_string_with_format(1, col as u16 + 5, *month, &month_header_fmt)
+            .map_err(|e: XlsxError| e.to_string())?;
+    }
+
+    // --- Main payroll section: rows 3–13 (0-based 2–12) ---
+    write_plata_main_section(worksheet, 2, &header_fmt, &cell_fmt, &pct_fmt, &light_green_fmt)
+        .map_err(|e: XlsxError| e.to_string())?;
+
+    // --- Row 14 empty; declaration rows 15–18 (0-based 14–17) ---
+    let decl_labels = [
+        "Вкупно нето ефективна плата по декларација",
+        "Разлика по декларација за ПДД и одбитоци",
+        "Задршки",
+        "Разлика",
+    ];
+    for (i, label) in decl_labels.iter().enumerate() {
+        let r = 14u32 + i as u32;
+        worksheet
+            .write_string_with_format(r, 1, *label, &light_green_fmt)
+            .map_err(|e: XlsxError| e.to_string())?;
+        for col in 5..17u16 {
+            let _ = worksheet.write_string_with_format(r, col, "0", &light_green_fmt);
+        }
+    }
+
+    // --- Rows 19–20 empty; employee rows 21–22 (0-based 20–21) ---
+    worksheet
+        .write_string_with_format(
+            20,
+            1,
+            "Број на вработени за кои се пресметува плата",
+            &light_green_fmt,
+        )
+        .map_err(|e: XlsxError| e.to_string())?;
+    worksheet
+        .write_string_with_format(
+            21,
+            1,
+            "Максимално дозволено даночно ослободување",
+            &light_green_fmt,
+        )
+        .map_err(|e: XlsxError| e.to_string())?;
+    for col in 5..17u16 {
+        let _ = worksheet.write_string_with_format(20, col, "", &light_green_fmt);
+        let _ = worksheet.write_string_with_format(21, col, "", &light_green_fmt);
+    }
+
+    // --- Rows 23–24 empty; tax block rows 25–27 (0-based 24–26) ---
+    let tax_labels = [
+        "Даночно ослободување",
+        "Максимално дозволено даночно ослободување",
+        "Разлика (не смее да биде негативна)",
+    ];
+    for (i, label) in tax_labels.iter().enumerate() {
+        let r = 24u32 + i as u32;
+        worksheet
+            .write_string_with_format(r, 1, *label, &light_green_fmt)
+            .map_err(|e: XlsxError| e.to_string())?;
+        for col in 5..17u16 {
+            let _ = worksheet.write_string_with_format(r, col, "", &light_green_fmt);
+        }
+    }
+
+    let _ = worksheet.set_freeze_panes(2, 0);
+    workbook.save(path).map_err(|e: XlsxError| e.to_string())?;
     Ok(())
 }

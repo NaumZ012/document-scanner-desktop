@@ -16,6 +16,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             // Load .env from app data dir so production users can place credentials there (Settings → Open app data folder)
@@ -44,6 +45,7 @@ pub fn run() {
             commands::export_to_new_excel_with_columns,
             commands::copy_template_and_append_rows,
             commands::copy_template_and_fill_tax_balance,
+            commands::get_plata_template_path,
             commands::append_invoices_to_existing_excel,
             commands::validate_document_file,
             commands::validate_excel_file,

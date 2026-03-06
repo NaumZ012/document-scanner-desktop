@@ -5,6 +5,7 @@ import { runOcrInvoice, addHistoryRecord, buildExtractedDataWithConfidence } fro
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
 import { invoiceDataToFields } from "@/utils/invoiceDataToFields";
+import { logger } from "@/utils/logger";
 import styles from "./DragDrop.module.css";
 
 const ACCEPT_TYPES = [
@@ -15,6 +16,10 @@ const ACCEPT_TYPES = [
   "image/tiff",
 ];
 const ACCEPT_EXT = [".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif"];
+
+// Azure has payload size limits; reject obviously huge files from the HTML drag/drop
+// path so the user gets a clear message before we call the backend.
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
 
 const LOADING_HINTS = [
   { icon: "🔢", label: "Se analizira broj…" },
@@ -44,19 +49,27 @@ export function DragDrop() {
   const processFile = useCallback(
     async (filePath: string, fileName: string) => {
       setLoading(true);
+      const scanId =
+        (typeof crypto !== "undefined" && "randomUUID" in crypto && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2));
       try {
         // Pass document type to OCR so it can select the appropriate model
         const docTypeForOcr = defaultDocumentType ?? "faktura";
+        logger.info("scan:start", { scanId, filePath, documentType: docTypeForOcr });
         const invoiceData = await runOcrInvoice(filePath, docTypeForOcr);
         const fields = invoiceDataToFields(invoiceData);
-        const docType = invoiceData.fields.document_type?.value ?? defaultDocumentType ?? "generic";
+        // Use the user-selected/default document type for layout,
+        // so misclassified OCR labels (e.g. "Даночен биланс" on an invoice)
+        // do not switch the review screen to the wrong schema.
+        const docType = docTypeForOcr;
         const extractedData = buildExtractedDataWithConfidence(fields);
         let historyId: number | null = null;
         try {
           historyId = await addHistoryRecord({
             document_type: docType,
             file_path_or_name: fileName,
-            extracted_data,
+            extracted_data: extractedData,
             status: "pending",
             folder_id: defaultFolderId ?? undefined,
           });
@@ -66,6 +79,16 @@ export function DragDrop() {
         const contentSummary = Object.entries(invoiceData.fields)
           .map(([k, v]) => `${k}: ${v.value}`)
           .join("\n");
+        const documentCount = (invoiceData as any)._document_count as number | undefined;
+        logger.info("scan:success", {
+          scanId,
+          filePath,
+          documentType: docType,
+          historyId,
+          fieldCount: Object.keys(invoiceData.fields ?? {}).length,
+          documentCount: documentCount ?? 1,
+        });
+        const maybeMultipleDocuments = documentCount != null && documentCount > 1;
         setReview({
           filePath,
           fileName,
@@ -73,9 +96,15 @@ export function DragDrop() {
           documentType: docType,
           fields,
           historyId,
+          maybeMultipleDocuments,
         });
         setScreen("review");
       } catch (e) {
+        logger.error("scan:error", {
+          scanId,
+          filePath,
+          error: e instanceof Error ? e.message : String(e),
+        });
         showError(e instanceof Error ? e.message : String(e));
       } finally {
         setLoading(false);
@@ -128,6 +157,10 @@ export function DragDrop() {
       const file = e.dataTransfer?.files?.[0];
       if (!file || !isAcceptedFile(file)) {
         showError("Please drop a PDF or image (JPG, PNG, TIFF).");
+        return;
+      }
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        showError("Фајлот е преголем за скенирање. Намали ја големината или скенирај помал документ.");
         return;
       }
       const path = (file as File & { path?: string }).path;

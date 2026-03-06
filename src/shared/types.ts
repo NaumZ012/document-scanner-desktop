@@ -58,6 +58,8 @@ export interface OcrInvoiceResult {
   invoice_data: InvoiceData;
   /** Raw result.contents[0].fields from Azure (for parseAzureExtraction and debug). */
   raw_azure_fields?: Record<string, unknown> | null;
+  /** Total number of documents Azure detected inside this file (1 = normal). */
+  document_count?: number | null;
 }
 
 /** Information about a failed scan attempt. */

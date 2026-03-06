@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useApp } from "@/context/AppContext";
@@ -44,6 +44,11 @@ function getFieldValue(inv: InvoiceData, key: string): string {
 
 function getFieldConfidence(inv: InvoiceData, key: string): number | undefined {
   return inv.fields[key]?.confidence;
+}
+
+/** True when the string actually contains data (treats "0" as a real value). */
+function hasNonEmptyValue(value: string | undefined | null): boolean {
+  return value != null && value.trim() !== "";
 }
 
 /** Format a field value for display: "0" when extracted zero, "—" only when no data. */
@@ -245,7 +250,7 @@ function PreviewModal({ filePath, fileName, onClose, invoice, documentType }: Pr
                         <span className={styles.previewFieldValue}>
                           {(() => {
                             const val = getFieldValue(invoice, "total_amount");
-                            return val ? formatAmountForDisplay(val) : "—";
+                            return hasNonEmptyValue(val) ? formatAmountForDisplay(val) : "—";
                           })()}
                         </span>
                         <span className={styles.schemaFieldConfidence} title="Доверба (од моделот)">
@@ -274,12 +279,28 @@ export function BatchReview() {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [previewFilePath, setPreviewFilePath] = useState<{ path: string; name: string } | null>(null);
   const [rescanningIndex, setRescanningIndex] = useState<number | null>(null);
+  const lastCardRef = useRef<HTMLElement | null>(null);
 
   const batchDocType = useMemo(() => {
     const first = batchInvoices?.[0];
     if (!first) return "";
-    const raw = getFieldValue(first, "document_type");
-    return normalizeDocumentType(raw || (defaultDocumentType as string | undefined));
+    // Infer from first document when it clearly is DDV/smetka/plata, so export uses the correct template and filename.
+    const docTypeFromField = first.fields.document_type?.value;
+    if (docTypeFromField != null && docTypeFromField.trim() !== "") {
+      const normalized = normalizeDocumentType(docTypeFromField);
+      if (normalized === "generic" || normalized === "smetka" || normalized === "plata") {
+        return normalized;
+      }
+    }
+    // If document has DDV-specific fields with values, treat batch as DDV (generic).
+    const hasDdvData =
+      hasNonEmptyValue(first.fields.taxPeriod?.value) ||
+      hasNonEmptyValue(first.fields.totalOutputVat?.value) ||
+      hasNonEmptyValue(first.fields.prometOpshtaStapkaOsnova?.value) ||
+      hasNonEmptyValue(first.fields.prometOpshtaStapkaDDV?.value);
+    if (hasDdvData) return "generic";
+    // Otherwise use user-selected/default document type.
+    return normalizeDocumentType(defaultDocumentType as string | undefined);
   }, [batchInvoices, defaultDocumentType]);
 
   const batchDocLabel = useMemo(() => {
@@ -292,6 +313,12 @@ export function BatchReview() {
   useEffect(() => {
     setInvoices(batchInvoices ?? []);
   }, [batchInvoices]);
+
+  // When new documents are scanned into the batch, smoothly scroll to the newest card.
+  useEffect(() => {
+    if (!lastCardRef.current) return;
+    lastCardRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [invoices.length]);
 
   useEffect(() => {
     setFailures(batchFailures ?? []);
@@ -454,7 +481,12 @@ export function BatchReview() {
               const taxSchema = getSchemaForDocumentType("smetka");
 
               return (
-                <article key={index} className={styles.card} data-index={index}>
+                <article
+                  key={index}
+                  className={styles.card}
+                  data-index={index}
+                  ref={index === invoices.length - 1 ? (lastCardRef as React.RefObject<HTMLDivElement>) : undefined}
+                >
                   <div className={styles.cardTop}>
                     <div className={styles.cardHeader}>
                       <span className={styles.cardHeaderSeller}>
@@ -578,13 +610,13 @@ export function BatchReview() {
                         <div className={styles.gridLabel}>
                           Даночна основа по намалување (V):
                           <span className={styles.cardValue}>
-                            {taxBase ? formatAmountForDisplay(taxBase) : "—"}
+                            {hasNonEmptyValue(taxBase) ? formatAmountForDisplay(taxBase) : "—"}
                           </span>
                         </div>
                         <div className={styles.gridLabel}>
                           Пресметан данок на добивка (VI):
                           <span className={styles.cardValue}>
-                            {calculatedTax ? formatAmountForDisplay(calculatedTax) : "—"}
+                            {hasNonEmptyValue(calculatedTax) ? formatAmountForDisplay(calculatedTax) : "—"}
                           </span>
                         </div>
                         <div className={styles.gridLabel}>
@@ -592,14 +624,14 @@ export function BatchReview() {
                           <span className={styles.cardValue}>
                             {(() => {
                               const val = getFieldValue(inv, "advanceTaxPaid");
-                              return val ? formatAmountForDisplay(val) : "—";
+                              return hasNonEmptyValue(val) ? formatAmountForDisplay(val) : "—";
                             })()}
                           </span>
                         </div>
                         <div className={styles.gridLabel}>
                           Износ за доплата / повеќе платен износ:
                           <span className={styles.cardValue}>
-                            {finalBalance ? formatAmountForDisplay(finalBalance) : "—"}
+                            {hasNonEmptyValue(finalBalance) ? formatAmountForDisplay(finalBalance) : "—"}
                           </span>
                         </div>
                       </div>
@@ -626,18 +658,23 @@ export function BatchReview() {
               );
             }
 
-            // Custom layout for ДДВ (VAT return)
+            // Custom layout for ДДВ (VAT return) – uses DDV analyzer schema only
             if (normDocType === "generic") {
               const company = getFieldValue(inv, "companyName") || getFieldValue(inv, "seller_name");
               const period = getFieldValue(inv, "taxPeriod") || getFieldValue(inv, "date");
-              const totalTaxBase = getFieldValue(inv, "totalTaxBase") || getFieldValue(inv, "net_amount");
+              const totalTaxBase = getFieldValue(inv, "totalTaxBase");
               const totalOutputVat = getFieldValue(inv, "totalOutputVat");
               const totalInputVat = getFieldValue(inv, "totalInputVat");
-              const vatPayableOrRefund = getFieldValue(inv, "vatPayableOrRefund") || getFieldValue(inv, "total_amount");
+              const vatPayableOrRefund = getFieldValue(inv, "vatPayableOrRefund");
               const ddvSchema = getSchemaForDocumentType("generic");
 
               return (
-                <article key={index} className={styles.card} data-index={index}>
+                <article
+                  key={index}
+                  className={styles.card}
+                  data-index={index}
+                  ref={index === invoices.length - 1 ? (lastCardRef as React.RefObject<HTMLDivElement>) : undefined}
+                >
                   <div className={styles.cardTop}>
                     <div className={styles.cardHeader}>
                       <span className={styles.cardHeaderSeller}>
@@ -743,25 +780,25 @@ export function BatchReview() {
                         <div className={styles.gridLabel}>
                           Вкупна даночна основа:
                           <span className={styles.cardValue}>
-                            {totalTaxBase ? formatAmountForDisplay(totalTaxBase) : "—"}
+                            {hasNonEmptyValue(totalTaxBase) ? formatAmountForDisplay(totalTaxBase) : "—"}
                           </span>
                         </div>
                         <div className={styles.gridLabel}>
                           Вкупен излезен ДДВ:
                           <span className={styles.cardValue}>
-                            {totalOutputVat ? formatAmountForDisplay(totalOutputVat) : "—"}
+                            {hasNonEmptyValue(totalOutputVat) ? formatAmountForDisplay(totalOutputVat) : "—"}
                           </span>
                         </div>
                         <div className={styles.gridLabel}>
                           Вкупен влезен ДДВ:
                           <span className={styles.cardValue}>
-                            {totalInputVat ? formatAmountForDisplay(totalInputVat) : "—"}
+                            {hasNonEmptyValue(totalInputVat) ? formatAmountForDisplay(totalInputVat) : "—"}
                           </span>
                         </div>
                         <div className={styles.gridLabel}>
                           ДДВ за плаќање / поврат:
                           <span className={styles.cardValue}>
-                            {vatPayableOrRefund ? formatAmountForDisplay(vatPayableOrRefund) : "—"}
+                            {hasNonEmptyValue(vatPayableOrRefund) ? formatAmountForDisplay(vatPayableOrRefund) : "—"}
                           </span>
                         </div>
                       </div>
@@ -798,7 +835,12 @@ export function BatchReview() {
               const payrollSchema = getSchemaForDocumentType("plata");
 
               return (
-                <article key={index} className={styles.card} data-index={index}>
+                <article
+                  key={index}
+                  className={styles.card}
+                  data-index={index}
+                  ref={index === invoices.length - 1 ? (lastCardRef as React.RefObject<HTMLDivElement>) : undefined}
+                >
                   <div className={styles.cardTop}>
                     <div className={styles.cardHeader}>
                       <span className={styles.cardHeaderSeller}>
@@ -895,19 +937,19 @@ export function BatchReview() {
                         <div className={styles.gridLabel}>
                           Вкупна бруто плата:
                           <span className={styles.cardValue}>
-                            {totalGross ? formatAmountForDisplay(totalGross) : "—"}
+                            {hasNonEmptyValue(totalGross) ? formatAmountForDisplay(totalGross) : "—"}
                           </span>
                         </div>
                         <div className={styles.gridLabel}>
                           Вкупна нето плата:
                           <span className={styles.cardValue}>
-                            {totalNet ? formatAmountForDisplay(totalNet) : "—"}
+                            {hasNonEmptyValue(totalNet) ? formatAmountForDisplay(totalNet) : "—"}
                           </span>
                         </div>
                         <div className={styles.gridLabel}>
                           Вкупен трошок за плати:
                           <span className={styles.cardValue}>
-                            {totalCost ? formatAmountForDisplay(totalCost) : "—"}
+                            {hasNonEmptyValue(totalCost) ? formatAmountForDisplay(totalCost) : "—"}
                           </span>
                         </div>
                       </div>
@@ -937,10 +979,15 @@ export function BatchReview() {
             // Default invoice layout (existing behaviour)
             const seller = getFieldValue(inv, "seller_name");
             const totalRaw = getFieldValue(inv, "total_amount");
-            const total = totalRaw ? formatAmountForDisplay(totalRaw) : "";
+            const total = hasNonEmptyValue(totalRaw) ? formatAmountForDisplay(totalRaw) : "";
 
             return (
-              <article key={index} className={styles.card} data-index={index}>
+              <article
+                key={index}
+                className={styles.card}
+                data-index={index}
+                ref={index === invoices.length - 1 ? (lastCardRef as React.RefObject<HTMLDivElement>) : undefined}
+              >
                 <div className={styles.cardTop}>
                   <div className={styles.cardHeader}>
                     <span className={styles.cardHeaderSeller}>
@@ -1002,7 +1049,7 @@ export function BatchReview() {
                           className={`${styles.input} ${styles.inputNumber}`}
                           value={(() => {
                             const val = getFieldValue(inv, "total_amount");
-                            return val ? formatAmountForDisplay(val) : "";
+                            return hasNonEmptyValue(val) ? formatAmountForDisplay(val) : "";
                           })()}
                           onChange={(e) => {
                             const raw = normalizeAmountInput(e.target.value);
@@ -1065,7 +1112,7 @@ export function BatchReview() {
                           className={`${styles.input} ${styles.inputNumber}`}
                           value={(() => {
                             const val = getFieldValue(inv, "net_amount");
-                            return val ? formatAmountForDisplay(val) : "";
+                            return hasNonEmptyValue(val) ? formatAmountForDisplay(val) : "";
                           })()}
                           onChange={(e) => {
                             const raw = normalizeAmountInput(e.target.value);
@@ -1084,7 +1131,7 @@ export function BatchReview() {
                           className={`${styles.input} ${styles.inputNumber}`}
                           value={(() => {
                             const val = getFieldValue(inv, "tax_amount");
-                            return val ? formatAmountForDisplay(val) : "";
+                            return hasNonEmptyValue(val) ? formatAmountForDisplay(val) : "";
                           })()}
                           onChange={(e) => {
                             const raw = normalizeAmountInput(e.target.value);
@@ -1154,7 +1201,7 @@ export function BatchReview() {
                         <span className={styles.cardValue}>
                           {(() => {
                             const val = getFieldValue(inv, "total_amount");
-                            return val ? formatAmountForDisplay(val) : "—";
+                            return hasNonEmptyValue(val) ? formatAmountForDisplay(val) : "—";
                           })()}
                         </span>
                         <span className={styles.schemaFieldConfidence} title="Доверба (од моделот)">
@@ -1203,7 +1250,7 @@ export function BatchReview() {
                         <span className={styles.cardValue}>
                           {(() => {
                             const val = getFieldValue(inv, "net_amount");
-                            return val ? formatAmountForDisplay(val) : "—";
+                            return hasNonEmptyValue(val) ? formatAmountForDisplay(val) : "—";
                           })()}
                         </span>
                         <span className={styles.schemaFieldConfidence} title="Доверба (од моделот)">
@@ -1215,7 +1262,7 @@ export function BatchReview() {
                         <span className={styles.cardValue}>
                           {(() => {
                             const val = getFieldValue(inv, "tax_amount");
-                            return val ? formatAmountForDisplay(val) : "—";
+                            return hasNonEmptyValue(val) ? formatAmountForDisplay(val) : "—";
                           })()}
                         </span>
                         <span className={styles.schemaFieldConfidence} title="Доверба (од моделот)">

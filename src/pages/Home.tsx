@@ -1,12 +1,12 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Receipt, Calculator, Percent, CreditCard, Upload, FileText, X, LucideIcon } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
-import { batchScanInvoices, addHistoryRecord, buildExtractedDataFromInvoiceFields } from "@/services/api";
+import { runOcrInvoice, addHistoryRecord, buildExtractedDataFromInvoiceFields } from "@/services/api";
 import { DOCUMENT_TYPE_CHOICES } from "@/shared/constants";
-import type { DocumentType } from "@/shared/types";
+import type { DocumentType, InvoiceData } from "@/shared/types";
 import styles from "./Home.module.css";
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -27,6 +27,7 @@ export function Home() {
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [dropZoneActive, setDropZoneActive] = useState(false);
+  const scanInProgressRef = useRef(false);
 
   const effectiveDocumentType: DocumentType = chosenDocumentType ?? defaultDocumentType ?? "generic";
 
@@ -78,37 +79,89 @@ export function Home() {
 
   const handleScanAll = useCallback(async () => {
     if (selectedFiles.length === 0) return;
+    if (scanInProgressRef.current) return;
+    scanInProgressRef.current = true;
     setIsProcessing(true);
     try {
-      // Pass document type to OCR so it can select the appropriate model
-      const result = await batchScanInvoices(selectedFiles, effectiveDocumentType);
-      for (const inv of result.successes) {
-        const docType = inv.fields.document_type?.value ?? effectiveDocumentType;
-        const extractedData = buildExtractedDataFromInvoiceFields(inv.fields);
-        const fileName = inv.source_file ?? "scanned.pdf";
+      const successes: (InvoiceData & { source_file?: string; source_file_path?: string; _document_count?: number })[] = [];
+      const failures: { file_path: string; file_name: string; error: string }[] = [];
+      let firstNavigated = false;
+      const CONCURRENCY = 4;
+      let index = 0;
+
+      const processNext = async () => {
+        // Simple work queue: grab next index until we exhaust selectedFiles.
+        // JS is single-threaded so this increment is safe enough here.
+        const current = index;
+        if (current >= selectedFiles.length) return;
+        index += 1;
+        const path = selectedFiles[current];
+        const fileName = getFileName(path);
         try {
-          await addHistoryRecord({
-            document_type: docType,
-            file_path_or_name: fileName,
-            extracted_data: extractedData,
-            status: "pending",
-            folder_id: defaultFolderId ?? undefined,
+          const invoiceData = await runOcrInvoice(path, effectiveDocumentType);
+          const docType = invoiceData.fields.document_type?.value ?? effectiveDocumentType;
+          const extractedData = buildExtractedDataFromInvoiceFields(invoiceData.fields);
+          try {
+            await addHistoryRecord({
+              document_type: docType,
+              file_path_or_name: fileName,
+              extracted_data: extractedData,
+              status: "pending",
+              folder_id: defaultFolderId ?? undefined,
+            });
+          } catch {
+            // history failure is non-fatal
+          }
+          successes.push({
+            ...invoiceData,
+            source_file: fileName,
+            source_file_path: path,
           });
-        } catch {
-          // non-fatal: history add failed for this one
+          // Sort so PDFs that likely contain multiple documents (Azure detected >1 document)
+          // are shown last in the scanned list on BatchReview.
+          const sortedSuccesses = [...successes].sort((a: any, b: any) => {
+            const aMulti = (a._document_count ?? 1) > 1;
+            const bMulti = (b._document_count ?? 1) > 1;
+            if (aMulti === bMulti) return 0;
+            return aMulti ? 1 : -1;
+          });
+          setBatchInvoices(sortedSuccesses as any);
+          setBatchFailures([...failures] as any);
+          if (!firstNavigated) {
+            firstNavigated = true;
+            setScreen("batchReview");
+          }
+        } catch (e) {
+          failures.push({
+            file_path: path,
+            file_name: fileName,
+            error: e instanceof Error ? e.message : String(e),
+          });
+          setBatchFailures([...failures] as any);
         }
+        // Recurse to pick up the next job in this worker.
+        await processNext();
+      };
+
+      const workers: Promise<void>[] = [];
+      const workerCount = Math.min(CONCURRENCY, selectedFiles.length);
+      for (let i = 0; i < workerCount; i += 1) {
+        workers.push(processNext());
       }
-      setBatchInvoices(result.successes);
-      setBatchFailures(result.failures);
-      setScreen("batchReview");
-      if (result.failures.length > 0) {
-        showSuccess(
-          `${result.successes.length} of ${selectedFiles.length} invoices scanned. ${result.failures.length} file(s) failed.`
-        );
+      await Promise.all(workers);
+
+      if (failures.length > 0) {
+        const summary = `${successes.length} од ${selectedFiles.length} документи успешно скенирани. ${failures.length} неуспешни.`;
+        if (successes.length === 0 && failures[0]) {
+          showError(`${summary} Грешка: ${failures[0].error}`);
+        } else {
+          showSuccess(summary);
+        }
       }
     } catch (e) {
       showError(e instanceof Error ? e.message : String(e));
     } finally {
+      scanInProgressRef.current = false;
       setIsProcessing(false);
     }
   }, [selectedFiles, setBatchInvoices, setScreen, showError, showSuccess, effectiveDocumentType, defaultFolderId]);
@@ -123,7 +176,7 @@ export function Home() {
     return (
       <div className={styles.landingPage}>
         <div className={styles.hero}>
-          <h1 className={styles.landingTitle}>Invoice Scanner</h1>
+          <h1 className={styles.landingTitle}>Document Scanner</h1>
           <p className={styles.landingSubtitle}>
             Изберете тип на документ за скенирање
           </p>
@@ -172,7 +225,7 @@ export function Home() {
           </button>
         </div>
         <div className={styles.hero}>
-          <h1 className={styles.title}>Invoice Scanner</h1>
+          <h1 className={styles.title}>Document Scanner</h1>
           <p className={styles.subtitle}>
             {selectedFiles.length === 0
               ? "Додајте документи за скенирање"
@@ -293,7 +346,7 @@ export function Home() {
           <div className={styles.scanOverlayContent}>
             <div className={styles.scanSpinner} aria-hidden="true" />
             <p className={styles.scanOverlayText}>
-              Scanning {selectedFiles.length} invoice{selectedFiles.length !== 1 ? "s" : ""}…
+              Scanning
             </p>
           </div>
         </div>

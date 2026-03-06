@@ -132,8 +132,8 @@ const TAX_BALANCE_FIELDS: DocumentTypeFieldDef[] = [
 
 /** Form layout for Преглед — official section + description per AOP line; value column maps to Excel column D. */
 export const TAX_BALANCE_FORM_ROWS: TaxBalanceFormRow[] = TAX_BALANCE_AOP_KEYS.map((key, i) => ({
-  section: TAX_BALANCE_ROW_DESCRIPTIONS[i].section,
-  description: TAX_BALANCE_ROW_DESCRIPTIONS[i].description,
+  section: TAX_BALANCE_ROW_DESCRIPTIONS[i]?.section ?? String(i + 1),
+  description: TAX_BALANCE_ROW_DESCRIPTIONS[i]?.description ?? `АОП ${i + 1}`,
   fieldKey: key,
 }));
 
@@ -144,6 +144,7 @@ export const TAX_BALANCE_EXCEL_ROW_MAP: Record<string, number> = Object.fromEntr
 
 /** ДДВ (VAT return) — matches РД-ДДВ Excel. */
 const DDV_FIELDS: DocumentTypeFieldDef[] = [
+  // Metadata (shown in forms, not part of official 01–20 column set)
   { key: "taxPeriod", label: label("taxPeriod", DDV_FIELD_LABELS_MK) },
   { key: "companyName", label: label("companyName", DDV_FIELD_LABELS_MK) },
   { key: "companyTaxId", label: label("companyTaxId", DDV_FIELD_LABELS_MK) },
@@ -187,11 +188,64 @@ const DDV_FIELDS: DocumentTypeFieldDef[] = [
   { key: "description", label: label("description", DDV_FIELD_LABELS_MK) },
 ];
 
-/** Плати (Payroll) — matches РД-Трошоци за вработени Excel. */
+/** Column order for DDВ Excel export – matches РД-ДДВ template (Период, 01–19, Вкупно, Ред.). */
+export const DDV_EXCEL_COLUMN_KEYS: string[] = [
+  "taxPeriod",
+  "prometOpshtaStapkaOsnova",
+  "prometOpshtaStapkaDDV",
+  "prometPovlastenaStapka10Osnova",
+  "prometPovlastenaStapka10DDV",
+  "prometPovlastenaStapka5Osnova",
+  "prometPovlastenaStapka5DDV",
+  "izvoz",
+  "oslobodenSOPravoNaOdbivka",
+  "oslobodenBezPravoNaOdbivka",
+  "prometNerezidentiNeOdanocliv",
+  "prometPrenesuvanjeDanocnaObvrska",
+  "primenPrometNerezidentiOpshtaOsnova",
+  "primenPrometNerezidentiOpshtaDDV",
+  "primenPrometNerezidentiPovlastenaOsnova",
+  "primenPrometNerezidentiPovlastenaDDV",
+  "primenPrometZemjaOpshtaOsnova",
+  "primenPrometZemjaOpshtaDDV",
+  "primenPrometZemjaPovlastenaOsnova",
+  "primenPrometZemjaPovlastenaDDV",
+  "totalOutputVat",
+  "rowOrder",
+];
+
+/** Headers for DDВ Excel export – exact match to РД-ДДВ-Example.xlsx (official sub-header row). */
+export const DDV_EXCEL_HEADERS: string[] = [
+  "Период",
+  "Даночна основа без ДДВ",
+  "ДДВ",
+  "Даночна основа без ДДВ",
+  "ДДВ",
+  "Даночна основа без ДДВ",
+  "ДДВ",
+  "Извоз",
+  "Промет ослободен од данок со право на одбивка на претходен данок",
+  "Промет ослободен од данок без право на одбивка на претходен данок",
+  "Промет извршен спрема даночни обврзници кои немаат седиште во земјата, кој не е предмет на оданочување во земјата",
+  "Промет во земјата за кој данокот го пресметува примателот на прометот (пренесување на даночна обврска согласно член 32-а)",
+  "Даночна основа без ДДВ",
+  "ДДВ",
+  "Даночна основа без ДДВ",
+  "ДДВ",
+  "Даночна основа без ДДВ",
+  "ДДВ",
+  "Даночна основа без ДДВ",
+  "ДДВ",
+  "Вкупно",
+  "Реф.",
+];
+
+/** Плати (Payroll) — matches schemas/MacedonianPayrollAnalyzer.json fieldSchema (РД-Трошоци за вработени). */
 const PAYROLL_FIELDS: DocumentTypeFieldDef[] = [
-  { key: "year", label: label("year", PAYROLL_FIELD_LABELS_MK) },
   { key: "companyName", label: label("companyName", PAYROLL_FIELD_LABELS_MK) },
-  // Rows 1–7 in РД-Трошоци за вработени
+  { key: "companyTaxId", label: label("companyTaxId", PAYROLL_FIELD_LABELS_MK) },
+  { key: "declarationPeriod", label: label("declarationPeriod", PAYROLL_FIELD_LABELS_MK) },
+  { key: "brojVraboteni", label: label("brojVraboteni", PAYROLL_FIELD_LABELS_MK) },
   { key: "brutoPlata", label: label("brutoPlata", PAYROLL_FIELD_LABELS_MK) },
   { key: "pridonesPIO", label: label("pridonesPIO", PAYROLL_FIELD_LABELS_MK) },
   { key: "pridonesZdravstvo", label: label("pridonesZdravstvo", PAYROLL_FIELD_LABELS_MK) },

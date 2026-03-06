@@ -3,7 +3,25 @@ import type { OcrResult, InvoiceData, FailedScan } from "@/shared/types";
 import type { ExtractedField } from "@/shared/types";
 import type { DocumentType } from "@/shared/types";
 
-export type Screen = "home" | "review" | "history" | "settings" | "batchReview";
+export type Screen =
+  | "auth"
+  | "employee"
+  | "home"
+  | "review"
+  | "history"
+  | "settings"
+  | "batchReview"
+  | "profile"
+  | "admin";
+
+/** Current user of this app session: owner (skip) or selected employee. */
+export interface CurrentSessionUser {
+  id: string | null;
+  name: string;
+}
+
+/** Current app_sessions.id for the active session (created on employee screen; null until then). */
+export type CurrentAppSessionId = string | null;
 
 interface ReviewState {
   filePath: string;
@@ -18,6 +36,8 @@ interface ReviewState {
   status?: string;
   /** When opened from History: original created_at timestamp for this record */
   historyCreatedAt?: string;
+  /** Hint that Azure detected multiple logical documents inside this file. */
+  maybeMultipleDocuments?: boolean;
 }
 
 export type Language = "mk" | "en";
@@ -53,21 +73,48 @@ interface AppContextValue {
   setFontSize: (f: "small" | "medium" | "large") => void;
   compactMode: boolean;
   setCompactMode: (v: boolean) => void;
+  /** Who is using the app this session: owner or employee. */
+  currentSessionUser: CurrentSessionUser | null;
+  setCurrentSessionUser: (u: CurrentSessionUser | null) => void;
+  currentAppSessionId: CurrentAppSessionId;
+  setCurrentAppSessionId: (id: CurrentAppSessionId) => void;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);
 
-const THEME_KEY = "invoice-scanner-theme";
-const DESIGN_KEY = "invoice-scanner-design";
-const LANGUAGE_KEY = "invoice-scanner-language";
-const DEFAULT_DOC_TYPE_KEY = "invoice-scanner-default-doc-type";
-const CONFIDENCE_THRESHOLD_KEY = "invoice-scanner-confidence-threshold";
-const DATE_FORMAT_KEY = "invoice-scanner-date-format";
-const DEFAULT_FOLDER_KEY = "invoice-scanner-default-folder";
-const HISTORY_PAGE_SIZE_KEY = "invoice-scanner-history-page-size";
-const CONFIRM_BEFORE_EXPORT_KEY = "invoice-scanner-confirm-before-export";
-const FONT_SIZE_KEY = "invoice-scanner-font-size";
-const COMPACT_MODE_KEY = "invoice-scanner-compact-mode";
+const THEME_KEY = "document-scanner-theme";
+const DESIGN_KEY = "document-scanner-design";
+const LANGUAGE_KEY = "document-scanner-language";
+const DEFAULT_DOC_TYPE_KEY = "document-scanner-default-doc-type";
+const CONFIDENCE_THRESHOLD_KEY = "document-scanner-confidence-threshold";
+const DATE_FORMAT_KEY = "document-scanner-date-format";
+const DEFAULT_FOLDER_KEY = "document-scanner-default-folder";
+const HISTORY_PAGE_SIZE_KEY = "document-scanner-history-page-size";
+const CONFIRM_BEFORE_EXPORT_KEY = "document-scanner-confirm-before-export";
+const FONT_SIZE_KEY = "document-scanner-font-size";
+const COMPACT_MODE_KEY = "document-scanner-compact-mode";
+const CURRENT_SESSION_USER_KEY = "document-scanner-current-session-user";
+const CURRENT_APP_SESSION_ID_KEY = "document-scanner-current-app-session-id";
+
+function loadCurrentSessionUser(): CurrentSessionUser | null {
+  try {
+    const raw = sessionStorage.getItem(CURRENT_SESSION_USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CurrentSessionUser;
+    if (parsed && typeof parsed.name === "string") return parsed;
+  } catch {}
+  return null;
+}
+
+function loadCurrentAppSessionId(): CurrentAppSessionId {
+  try {
+    const raw = sessionStorage.getItem(CURRENT_APP_SESSION_ID_KEY);
+    if (!raw) return null;
+    return raw;
+  } catch {}
+  return null;
+}
+
 export type ThemePreference = "light" | "dark" | "system";
 export type DesignVariant = "default" | "warm" | "cool" | "oled" | "purple";
 
@@ -179,7 +226,7 @@ function getResolvedTheme(pref: ThemePreference): "light" | "dark" {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [screen, setScreen] = useState<Screen>("home");
+  const [screen, setScreen] = useState<Screen>("auth");
   const [review, setReview] = useState<ReviewState | null>(null);
   const [batchInvoices, setBatchInvoices] = useState<InvoiceData[] | null>(null);
   const [batchFailures, setBatchFailures] = useState<FailedScan[] | null>(null);
@@ -273,6 +320,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
+  const [currentSessionUser, setCurrentSessionUserState] = useState<CurrentSessionUser | null>(loadCurrentSessionUser);
+  const setCurrentSessionUser = useCallback((u: CurrentSessionUser | null) => {
+    setCurrentSessionUserState(u);
+    try {
+      if (u) sessionStorage.setItem(CURRENT_SESSION_USER_KEY, JSON.stringify(u));
+      else sessionStorage.removeItem(CURRENT_SESSION_USER_KEY);
+    } catch {}
+  }, []);
+
+  const [currentAppSessionId, setCurrentAppSessionIdState] = useState<CurrentAppSessionId>(loadCurrentAppSessionId);
+  const setCurrentAppSessionId = useCallback((id: CurrentAppSessionId) => {
+    setCurrentAppSessionIdState(id);
+    try {
+      if (id) sessionStorage.setItem(CURRENT_APP_SESSION_ID_KEY, id);
+      else sessionStorage.removeItem(CURRENT_APP_SESSION_ID_KEY);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     const scale = fontSize === "small" ? 0.9 : fontSize === "large" ? 1.1 : 1;
     document.documentElement.style.setProperty("--font-scale", String(scale));
@@ -336,6 +401,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setFontSize,
         compactMode,
         setCompactMode,
+        currentSessionUser,
+        setCurrentSessionUser,
+        currentAppSessionId,
+        setCurrentAppSessionId,
       }}
     >
       {children}

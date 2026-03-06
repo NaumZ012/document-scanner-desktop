@@ -3,11 +3,18 @@ import { save } from "@tauri-apps/plugin-dialog";
 import {
   exportInvoicesToNewExcel,
   exportToNewExcelWithColumns,
-  copyTemplateAndFillTaxBalance,
+  writeFileBase64,
 } from "@/services/api";
+import { exportPlataToNewTableBuffer } from "@/services/plataExportExcelJS";
+import { exportTaxBalanceToNewTableBuffer } from "@/services/taxBalanceExportExcelJS";
 import { useToast } from "@/context/ToastContext";
 import type { InvoiceData } from "@/shared/types";
-import { normalizeDocumentType, getSchemaForDocumentType } from "@/shared/documentTypeSchemas";
+import {
+  normalizeDocumentType,
+  getSchemaForDocumentType,
+  DDV_EXCEL_COLUMN_KEYS,
+  DDV_EXCEL_HEADERS,
+} from "@/shared/documentTypeSchemas";
 import styles from "./ExcelExportDialog.module.css";
 
 const MK = {
@@ -33,7 +40,7 @@ export function ExcelExportDialog({
   onExportComplete,
   documentType,
 }: ExcelExportDialogProps) {
-  const { error: showError, success: showSuccess } = useToast();
+  const { error: showError } = useToast();
   const [exporting, setExporting] = useState(false);
 
   const handleExport = useCallback(async () => {
@@ -58,35 +65,37 @@ export function ExcelExportDialog({
         title: MK.chooseLocation,
       });
       if (path == null) return;
+      // CRITICAL: Always .xlsx — never CSV. Normalize path so output is always Excel binary.
+      const savePath = path.toLowerCase().endsWith(".xlsx") ? path : `${path.replace(/\.[^.]*$/i, "")}.xlsx`;
 
       if (dt === "faktura") {
-        // Invoices: existing structured export (fixed column order).
-        const savedPath = await exportInvoicesToNewExcel(invoices, path, "Invoices");
+        const savedPath = await exportInvoicesToNewExcel(invoices, savePath, "Invoices");
         onExportComplete(savedPath);
-      } else if (dt === "generic" || dt === "plata") {
-        // ДДВ и Плати: build a fixed-column workbook from the document-type schema.
+      } else if (dt === "plata") {
+        // Плати: new workbook with only the payroll table (no logo, legend, or metadata). Values only to avoid Excel repair issues.
+        const resultBase64 = await exportPlataToNewTableBuffer(invoices);
+        await writeFileBase64(savePath, resultBase64);
+        onExportComplete(savePath);
+      } else if (dt === "generic") {
         const schema = getSchemaForDocumentType(dt);
-        const headers = schema.fields.map((f) => f.label);
-        const columnFieldKeys = schema.fields.map((f) => f.key);
         const savedPath = await exportToNewExcelWithColumns(
-          path,
+          savePath,
           schema.title,
-          headers,
-          columnFieldKeys,
+          DDV_EXCEL_HEADERS,
+          DDV_EXCEL_COLUMN_KEYS,
           invoices
         );
         onExportComplete(savedPath);
       } else if (dt === "smetka") {
-        // Даночен биланс: support export from batch screen only when there is a single document,
-        // mirroring the behavior from Преглед (one Excel form per scan).
         if (invoices.length !== 1) {
           showError(MK.notSupportedForType);
           setExporting(false);
           return;
         }
         const invoice = invoices[0]!;
-        const savedPath = await copyTemplateAndFillTaxBalance(0, path, invoice);
-        onExportComplete(savedPath);
+        const resultBase64 = await exportTaxBalanceToNewTableBuffer(invoice);
+        await writeFileBase64(savePath, resultBase64);
+        onExportComplete(savePath);
       }
       onClose();
     } catch (e) {

@@ -1,6 +1,6 @@
 import type { InvoiceData } from "@/shared/types";
 import type { ExtractedField } from "@/shared/types";
-import { FIELD_KEYS, FIELD_LABELS_MK, TAX_FIELD_LABELS_MK } from "@/shared/constants";
+import { FIELD_KEYS, FIELD_LABELS_MK, TAX_FIELD_LABELS_MK, PAYROLL_FIELD_LABELS_MK } from "@/shared/constants";
 import { sanitizeDescription } from "@/utils/parseAzureExtraction";
 import type { FieldKey } from "@/shared/constants";
 
@@ -16,6 +16,9 @@ function getLabelForKey(key: string): string {
   }
   if (TAX_FIELD_LABELS_MK[key]) {
     return TAX_FIELD_LABELS_MK[key];
+  }
+  if (PAYROLL_FIELD_LABELS_MK[key]) {
+    return PAYROLL_FIELD_LABELS_MK[key];
   }
   const nreMatch = key.match(/^nonRecognizedExpenseRows_(\d+)_(lineNumber|label|amount)$/);
   if (nreMatch) {

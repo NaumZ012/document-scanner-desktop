@@ -1,17 +1,8 @@
 import { useState, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
-import { useToast } from "@/context/ToastContext";
 import type { DesignVariant, ThemePreference } from "@/context/AppContext";
 import { useTranslations } from "@/hooks/useTranslations";
-import {
-  openAppDataFolder,
-  getFolders,
-  getAppVersion,
-  getAzureStatus,
-  clearLearnedMappings,
-} from "@/services/api";
-import { DOCUMENT_TYPES } from "@/shared/constants";
-import type { DocumentType } from "@/shared/types";
+import { openAppDataFolder, getFolders } from "@/services/api";
 import styles from "./Settings.module.css";
 
 function useResolvedTheme(theme: ThemePreference): "light" | "dark" {
@@ -49,22 +40,6 @@ const DARK_DESIGNS: { id: DesignVariant; label: string }[] = [
   { id: "oled", label: "OLED" },
 ];
 
-const DOC_TYPE_LABELS: Record<DocumentType, string> = {
-  faktura: "Faktura",
-  plata: "Plata",
-  smetka: "Smetka",
-  generic: "Generic",
-};
-
-const DOC_TYPE_LABELS_MK: Record<DocumentType, string> = {
-  faktura: "Фактура",
-  plata: "Плата",
-  smetka: "Сметка",
-  generic: "Општо",
-};
-
-const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
-
 export function Settings() {
   const {
     theme,
@@ -73,55 +48,23 @@ export function Settings() {
     setDesign,
     language,
     setLanguage,
-    defaultDocumentType,
-    setDefaultDocumentType,
-    confidenceThreshold,
-    setConfidenceThreshold,
-    dateFormat,
-    setDateFormat,
     defaultFolderId,
     setDefaultFolderId,
-    historyPageSize,
-    setHistoryPageSize,
-    defaultProfileId,
-    setDefaultProfileId,
     confirmBeforeExport,
     setConfirmBeforeExport,
-    fontSize,
-    setFontSize,
     compactMode,
     setCompactMode,
   } = useApp();
-  const { t, isMk } = useTranslations();
-  const { success } = useToast();
+  const { t } = useTranslations();
   const resolvedTheme = useResolvedTheme(theme);
 
   const isLight = resolvedTheme === "light";
   const designs = isLight ? LIGHT_DESIGNS : DARK_DESIGNS;
-  const docTypeLabels = isMk ? DOC_TYPE_LABELS_MK : DOC_TYPE_LABELS;
 
   const [folders, setFolders] = useState<[number, string, string][]>([]);
-  const [appVersion, setAppVersion] = useState<string>("");
-  const [azureStatus, setAzureStatus] = useState<string>("");
   useEffect(() => {
     getFolders().then(setFolders).catch(() => setFolders([]));
   }, []);
-  useEffect(() => {
-    getAppVersion().then(setAppVersion).catch(() => setAppVersion("—"));
-  }, []);
-  useEffect(() => {
-    getAzureStatus().then(setAzureStatus).catch(() => setAzureStatus("unknown"));
-  }, []);
-
-  const handleClearLearnedMappings = async () => {
-    if (!window.confirm(t("clearLearnedMappingsConfirm"))) return;
-    try {
-      await clearLearnedMappings();
-      success("Learned mappings cleared.");
-    } catch {
-      // error handled by toast if needed
-    }
-  };
 
   const handleOpenDataFolder = async () => {
     try {
@@ -203,62 +146,6 @@ export function Settings() {
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("defaultDocumentType")}</h2>
-        <p className={styles.sectionHint}>Default when OCR does not detect document type</p>
-        <select
-          className={styles.select}
-          value={defaultDocumentType}
-          onChange={(e) => setDefaultDocumentType(e.target.value as DocumentType)}
-        >
-          {DOCUMENT_TYPES.map((dt) => (
-            <option key={dt} value={dt}>
-              {docTypeLabels[dt]}
-            </option>
-          ))}
-        </select>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("confidenceThreshold")}</h2>
-        <p className={styles.sectionHint}>
-          Fields below this confidence are highlighted for review (0–1)
-        </p>
-        <div className={styles.sliderRow}>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={confidenceThreshold}
-            onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
-            className={styles.slider}
-          />
-          <span className={styles.sliderValue}>{Math.round(confidenceThreshold * 100)}%</span>
-        </div>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("dateFormat")}</h2>
-        <p className={styles.sectionHint}>How dates are displayed</p>
-        <div className={styles.themeCards}>
-          <button
-            type="button"
-            className={`${styles.themeCard} ${dateFormat === "DMY" ? styles.themeCardActive : ""}`}
-            onClick={() => setDateFormat("DMY")}
-          >
-            <span className={styles.themeCardLabel}>DD.MM.YYYY</span>
-          </button>
-          <button
-            type="button"
-            className={`${styles.themeCard} ${dateFormat === "YMD" ? styles.themeCardActive : ""}`}
-            onClick={() => setDateFormat("YMD")}
-          >
-            <span className={styles.themeCardLabel}>YYYY-MM-DD</span>
-          </button>
-        </div>
-      </section>
-
-      <section className={styles.section}>
         <h2 className={styles.sectionTitle}>{t("defaultFolder")}</h2>
         <p className={styles.sectionHint}>New history records are assigned to this folder</p>
         <select
@@ -276,40 +163,6 @@ export function Settings() {
             </option>
           ))}
         </select>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("historyPageSize")}</h2>
-        <p className={styles.sectionHint}>Number of items per page in History</p>
-        <div className={styles.themeCards}>
-          {PAGE_SIZE_OPTIONS.map((n) => (
-            <button
-              key={n}
-              type="button"
-              className={`${styles.themeCard} ${historyPageSize === n ? styles.themeCardActive : ""}`}
-              onClick={() => setHistoryPageSize(n)}
-            >
-              <span className={styles.themeCardLabel}>{n}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("fontSize")}</h2>
-        <p className={styles.sectionHint}>Base font size for the app</p>
-        <div className={styles.themeCards}>
-          {(["small", "medium", "large"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={`${styles.themeCard} ${fontSize === f ? styles.themeCardActive : ""}`}
-              onClick={() => setFontSize(f)}
-            >
-              <span className={styles.themeCardLabel}>{t(f)}</span>
-            </button>
-          ))}
-        </div>
       </section>
 
       <section className={styles.section}>
@@ -344,32 +197,6 @@ export function Settings() {
         <button type="button" className={styles.newBtn} onClick={handleOpenDataFolder}>
           {t("openDataFolder")}
         </button>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("clearLearnedMappings")}</h2>
-        <p className={styles.sectionHint}>
-          Clears cached column-to-field mappings. Mapping will be re-learned on next export.
-        </p>
-        <button
-          type="button"
-          className={`${styles.newBtn} ${styles.danger}`}
-          onClick={handleClearLearnedMappings}
-        >
-          {t("clearLearnedMappings")}
-        </button>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("appVersion")}</h2>
-        <p className={styles.sectionHint}>{appVersion || "…"}</p>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{t("azureStatus")}</h2>
-        <p className={styles.sectionHint}>
-          {azureStatus === "configured" ? t("configured") : t("notConfigured")}
-        </p>
       </section>
     </div>
   );

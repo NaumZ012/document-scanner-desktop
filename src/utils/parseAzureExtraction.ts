@@ -13,7 +13,7 @@ import type { InvoiceData, InvoiceFieldValue } from "@/shared/types";
 export type AzureFieldValue = Record<string, unknown>;
 
 /** Raw Azure fields object: result.contents[0].fields */
-export type AzureFieldsInput = Record<string, AzureFieldValue>;
+export type AzureFieldsInput = Record<string, unknown>;
 
 /** Flat output: canonical keys and string/number values, ready for DB */
 export type ParsedExtraction = Record<string, string | number>;
@@ -100,7 +100,7 @@ export function sanitizeDescription(raw: string): string {
  * Extract a single primitive value from an Azure field object using type-specific keys.
  * Returns string or number; uses optional chaining and safe fallbacks.
  */
-function extractAzureFieldValue(obj: AzureFieldValue): string | number | null {
+function extractAzureFieldValue(obj: unknown): string | number | null {
   if (obj == null) return null;
   // Azure sometimes returns a plain string for a field value
   if (typeof obj === "string") {
@@ -109,24 +109,24 @@ function extractAzureFieldValue(obj: AzureFieldValue): string | number | null {
   }
   if (typeof obj !== "object") return null;
 
-  const type = obj.type as string | undefined;
+  const o = obj as { [key: string]: unknown };
 
   // String-like
-  const valueString = obj.valueString ?? obj.content ?? obj.value;
+  const valueString = (o as any).valueString ?? (o as any).content ?? (o as any).value;
   if (valueString != null && typeof valueString === "string") {
     const trimmed = valueString.trim();
     if (trimmed !== "") return trimmed;
   }
 
   // Date
-  const valueDate = obj.valueDate;
+  const valueDate = (o as any).valueDate;
   if (valueDate != null && typeof valueDate === "string") {
     const trimmed = valueDate.trim();
     if (trimmed !== "") return trimmed;
   }
 
   // Number
-  const valueNumber = obj.valueNumber ?? obj.valueInteger;
+  const valueNumber = (o as any).valueNumber ?? (o as any).valueInteger;
   if (typeof valueNumber === "number" && !Number.isNaN(valueNumber)) return valueNumber;
   if (typeof valueNumber === "string") {
     const n = parseFloat(valueNumber);
@@ -134,7 +134,7 @@ function extractAzureFieldValue(obj: AzureFieldValue): string | number | null {
   }
 
   // Currency: valueCurrency.amount
-  const valueCurrency = obj.valueCurrency as { amount?: number | string } | undefined;
+  const valueCurrency = (o as any).valueCurrency as { amount?: number | string } | undefined;
   if (valueCurrency != null && typeof valueCurrency === "object") {
     const amount = valueCurrency.amount;
     if (typeof amount === "number" && !Number.isNaN(amount)) return amount;
@@ -170,6 +170,15 @@ function flattenValueArray(arr: unknown[], fieldKey: string): string {
     }
   }
   return parts.length > 0 ? parts.join("; ") : "";
+}
+
+function sanitizeDocumentType(raw: string): string {
+  if (typeof raw !== "string") return "";
+  // Remove any HTML comments like <!-- PageHeader: ... --> that Azure sometimes injects.
+  let s = raw.replace(/<!--[\s\S]*?-->/g, "").trim();
+  // Collapse repeated whitespace.
+  s = s.replace(/\s+/g, " ");
+  return s.trim();
 }
 
 /**
@@ -218,9 +227,16 @@ export function parseAzureExtraction(azureFields: AzureFieldsInput): ParsedExtra
     }
     const canonicalKey = AZURE_KEY_TO_CANONICAL[key] ?? baseKey;
     const isDescription = canonicalKey === "description" || key === "description";
+    const isDocType = canonicalKey === "document_type";
 
     if (typeof value === "string") {
-      out[canonicalKey] = isDescription ? sanitizeDescription(value) : value;
+      if (isDescription) {
+        out[canonicalKey] = sanitizeDescription(value);
+      } else if (isDocType) {
+        out[canonicalKey] = sanitizeDocumentType(value);
+      } else {
+        out[canonicalKey] = value;
+      }
     } else {
       out[canonicalKey] = value;
     }
@@ -283,10 +299,14 @@ export function parseAzureFieldsWithConfidence(
       typeof raw === "object" && raw !== null && "confidence" in raw
         ? (raw as { confidence?: number }).confidence
         : undefined;
-    const strValue =
-      canonicalKey === "description" || key === "description"
-        ? sanitizeDescription(String(value))
-        : String(value);
+    const isDescription = canonicalKey === "description" || key === "description";
+    const isDocType = canonicalKey === "document_type";
+    const rawStr = String(value);
+    const strValue = isDescription
+      ? sanitizeDescription(rawStr)
+      : isDocType
+      ? sanitizeDocumentType(rawStr)
+      : rawStr;
     if (strValue.trim() !== "" || typeof value === "number") {
       out[canonicalKey] = { value: strValue, confidence };
     }

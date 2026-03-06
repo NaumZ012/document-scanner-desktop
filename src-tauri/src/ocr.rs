@@ -1,11 +1,21 @@
 use crate::types::{InvoiceData, InvoiceFieldValue, OcrInvoiceResult, OcrLine, OcrResult};
 use reqwest::blocking::Client;
+use lopdf::Document;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 fn load_env() {
     let _ = dotenvy::dotenv();
+}
+
+/// Parse DDV amount string (handles European number format: dots as thousand sep).
+fn parse_ddv_amt(s: &str) -> f64 {
+    let s = s.trim().replace(',', "").replace('.', "");
+    if s.is_empty() {
+        return 0.0;
+    }
+    s.parse::<f64>().unwrap_or(0.0)
 }
 
 fn guess_mime_type(file_path: &str) -> &'static str {
@@ -23,17 +33,38 @@ fn guess_mime_type(file_path: &str) -> &'static str {
     }
 }
 
-pub fn run_ocr(file_path: &str) -> Result<OcrResult, String> {
+fn count_pages_best_effort(file_path: &str) -> Option<u32> {
+    let ext = Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext == "pdf" {
+        if let Ok(doc) = Document::load(file_path) {
+            let pages = doc.get_pages().len() as u32;
+            return Some(if pages == 0 { 1 } else { pages });
+        }
+        return None;
+    }
+    Some(1)
+}
+
+fn supabase_env() -> Result<(String, String), String> {
+    let url = std::env::var("VITE_SUPABASE_URL").map_err(|_| "VITE_SUPABASE_URL not set".to_string())?;
+    let anon = std::env::var("VITE_SUPABASE_ANON_KEY").map_err(|_| "VITE_SUPABASE_ANON_KEY not set".to_string())?;
+    Ok((url.trim_end_matches('/').to_string(), anon))
+}
+
+fn fetch_poll_json_via_edge(
+    file_path: &str,
+    document_type: Option<&str>,
+    access_token: &str,
+    employee_id: Option<&str>,
+    app_session_id: Option<&str>,
+) -> Result<serde_json::Value, String> {
     load_env();
-    let key = std::env::var("AZURE_OCR_KEY").map_err(|_| "AZURE_OCR_KEY not set in .env")?;
-    let endpoint = std::env::var("AZURE_OCR_ENDPOINT")
-        .map_err(|_| "AZURE_OCR_ENDPOINT not set in .env")?;
-    let endpoint = endpoint.trim_end_matches('/');
-    // Use Content Understanding "analyzeBinary" endpoint for local files (GA 2025-11-01).
-    let url = format!(
-        "{}/contentunderstanding/analyzers/prebuilt-document:analyzeBinary?api-version=2025-11-01",
-        endpoint
-    );
+    let (supabase_url, supabase_anon) = supabase_env()?;
+    let url = format!("{}/functions/v1/ocr_invoice", supabase_url);
 
     let bytes = fs::read(Path::new(file_path)).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -43,66 +74,84 @@ pub fn run_ocr(file_path: &str) -> Result<OcrResult, String> {
         }
     })?;
 
+    let file_name = Path::new(file_path)
+        .file_name()
+        .and_then(|o| o.to_str())
+        .unwrap_or("")
+        .to_string();
+    let pages = count_pages_best_effort(file_path);
+
     let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(180))
         .build()
         .map_err(|e| e.to_string())?;
 
-    let response = client
+    let mut req = client
         .post(&url)
-        .header("Ocp-Apim-Subscription-Key", &key)
+        .header("apikey", supabase_anon)
+        .header("Authorization", format!("Bearer {}", access_token))
         .header("Content-Type", guess_mime_type(file_path))
-        .body(bytes)
-        .send()
-        .map_err(|e| {
-            if e.is_connect() || e.is_timeout() {
-                "Check your internet connection and try again."
-            } else {
-                "Network error."
-            }
-            .to_string()
-        })?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().unwrap_or_default();
-        return Err(format!(
-            "OCR failed ({}): {}",
-            status,
-            if body.is_empty() {
-                "Invalid key or endpoint?"
-            } else {
-                body.as_str()
-            }
-        ));
+        .header("x-file-name", file_name);
+    if let Some(p) = pages {
+        req = req.header("x-pages", p.to_string());
+    }
+    if let Some(dt) = document_type {
+        if !dt.trim().is_empty() {
+            req = req.header("x-document-type", dt.trim());
+        }
+    }
+    if let Some(emp) = employee_id {
+        if !emp.trim().is_empty() {
+            req = req.header("x-employee-id", emp.trim());
+        }
+    }
+    if let Some(sid) = app_session_id {
+        if !sid.trim().is_empty() {
+            req = req.header("x-app-session-id", sid.trim());
+        }
     }
 
-    let get_result_url = response
-        .headers()
-        .get("Operation-Location")
-        .and_then(|v| v.to_str().ok())
-        .ok_or("No Operation-Location in response")?
-        .to_string();
+    let response = req.body(bytes).send().map_err(|e| {
+        if e.is_connect() || e.is_timeout() {
+            "Check your internet connection and try again."
+        } else {
+            "Network error."
+        }
+        .to_string()
+    })?;
 
-    // Poll for result (1s interval for faster completion; Azure allows reasonable polling)
-    for _ in 0..120 {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        let poll_resp = client
-            .get(&get_result_url)
-            .header("Ocp-Apim-Subscription-Key", &key)
-            .send()
-            .map_err(|e| e.to_string())?;
-        let poll_json: serde_json::Value =
-            poll_resp.json().map_err(|e| format!("Invalid JSON: {}", e))?;
+    let status = response.status();
+    if status.as_u16() == 429 {
+        return Err("Rate limit reached. Please try again later.".to_string());
+    }
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        if body.trim().is_empty() {
+            return Err(format!("OCR failed ({})", status));
+        }
+        return Err(body);
+    }
+
+    response
+        .json::<serde_json::Value>()
+        .map_err(|e| format!("Invalid JSON: {}", e))
+}
+
+pub fn run_ocr_via_edge(
+    file_path: &str,
+    access_token: &str,
+    employee_id: Option<&str>,
+    app_session_id: Option<&str>,
+) -> Result<OcrResult, String> {
+    let poll_json_outer = fetch_poll_json_via_edge(file_path, None, access_token, employee_id, app_session_id)?;
+
+    for _ in 0..1 {
+        let poll_json = poll_json_outer.clone();
         let status_str = poll_json
             .get("status")
             .and_then(|s| s.as_str())
             .unwrap_or("");
         if status_str.eq_ignore_ascii_case("succeeded") {
-            // RAW AZURE PAYLOAD — before any parsing or frontend state touches it
-            if let Ok(pretty) = serde_json::to_string_pretty(&poll_json) {
-                eprintln!("=== RAW AZURE PAYLOAD ===\n{}", pretty);
-            }
             let result = poll_json
                 .get("result")
                 .or_else(|| poll_json.get("analyzeResult"))
@@ -183,7 +232,22 @@ const AZURE_TO_FIELD: &[(&str, &str)] = &[
 /// Clean document_type so it contains only the type label, not the document number or extra fields.
 /// Strips: " бр.: 123", " No. 00121", " Number", ", ЕДБ:", "Банка" junk, trailing digits, etc.
 fn sanitize_document_type(raw: &str) -> String {
-    let s = raw.trim();
+    // Strip Azure HTML-style comments like "<!-- PageHeader: ... -->"
+    // that sometimes wrap the document type.
+    let mut s = raw.to_string();
+    loop {
+        if let Some(start) = s.find("<!--") {
+            if let Some(end_rel) = s[start + 4..].find("-->") {
+                let end = start + 4 + end_rel + 3;
+                s = format!("{}{}", &s[..start], &s[end..]);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    let s = s.trim();
     if s.is_empty() {
         return String::new();
     }
@@ -606,7 +670,7 @@ fn clean_company_name(raw_name: &str) -> String {
 }
 
 #[cfg(debug_assertions)]
-fn validate_company_name(name: &str, label: &str) {
+fn validate_company_name(name: &str, _label: &str) {
     let mut warnings: Vec<&str> = Vec::new();
     let trimmed = name.trim();
     if trimmed.len() < 3 {
@@ -636,10 +700,7 @@ fn validate_company_name(name: &str, label: &str) {
         warnings.push("Contains address keyword, might be address");
     }
     if !warnings.is_empty() {
-        eprintln!(
-            "[ocr] Warning: {} looks suspicious as company name: '{}' ({:?})",
-            label, trimmed, warnings
-        );
+        // Intentionally no logging in production builds.
     }
 }
 
@@ -896,8 +957,6 @@ fn extract_line_items_description(fields_obj: &serde_json::Map<String, serde_jso
     }
 
     if !parts.is_empty() {
-        #[cfg(debug_assertions)]
-        eprintln!("[ocr] MIS-02 Опис: {} part(s) from Item/Item2..Item10", parts.len());
         return (parts.join("\n"), confidence);
     }
 
@@ -940,124 +999,45 @@ fn extract_line_items_description(fields_obj: &serde_json::Map<String, serde_jso
     (String::new(), conf)
 }
 
-pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<OcrInvoiceResult, String> {
-    load_env();
-    let key = std::env::var("AZURE_OCR_KEY").map_err(|_| "AZURE_OCR_KEY not set in .env")?;
-    let endpoint = std::env::var("AZURE_OCR_ENDPOINT")
-        .map_err(|_| "AZURE_OCR_ENDPOINT not set in .env")?;
-    let endpoint = endpoint.trim_end_matches('/');
-    // Use YOUR custom analyzer IDs from .env. Only fall back to prebuilt if you have not set them.
-    // Set: AZURE_CU_ANALYZER_FAKTURA=MIS, AZURE_CU_ANALYZER_SMETKA=TaxBalance02,
-    //      AZURE_CU_ANALYZER_GENERIC=DDV, AZURE_CU_ANALYZER_PLATA=PayRoll (or your IDs).
-    let (analyzer_id, is_custom) = match document_type {
-        // Explicit mappings: ONLY use these models when the caller
-        // has intentionally selected the corresponding document type.
-        Some("faktura") => {
-            let id = std::env::var("AZURE_CU_ANALYZER_FAKTURA").unwrap_or_else(|_| "prebuilt-invoice".to_string());
-            (id.clone(), id != "prebuilt-invoice")
-        }
-        Some("smetka") => {
-            let id = std::env::var("AZURE_CU_ANALYZER_SMETKA").unwrap_or_else(|_| "prebuilt-document".to_string());
-            (id.clone(), id != "prebuilt-document")
-        }
-        Some("generic") => {
-            let id = std::env::var("AZURE_CU_ANALYZER_GENERIC").unwrap_or_else(|_| "prebuilt-document".to_string());
-            (id.clone(), id != "prebuilt-document")
-        }
-        Some("plata") => {
-            let id = std::env::var("AZURE_CU_ANALYZER_PLATA").unwrap_or_else(|_| "prebuilt-document".to_string());
-            (id.clone(), id != "prebuilt-document")
-        }
-        // Fallback: never assume "faktura"/MIS. Use prebuilt-document if
-        // type is missing or unknown so invoices are not accidentally
-        // sent through MIS without an explicit choice.
-        _ => {
-            let id = "prebuilt-document".to_string();
-            (id.clone(), false)
-        }
-    };
-    #[cfg(debug_assertions)]
-    if is_custom {
-        eprintln!("[ocr] Using YOUR custom analyzer: {}", analyzer_id);
-    }
+pub fn run_ocr_invoice_via_edge(
+    file_path: &str,
+    document_type: Option<&str>,
+    access_token: &str,
+    employee_id: Option<&str>,
+    app_session_id: Option<&str>,
+) -> Result<OcrInvoiceResult, String> {
+    let poll_json_outer =
+        fetch_poll_json_via_edge(file_path, document_type, access_token, employee_id, app_session_id)?;
 
-    // IMPORTANT: Use the Content Understanding "analyzeBinary" REST API (GA) for local files.
-    let url = format!(
-        "{}/contentunderstanding/analyzers/{}:analyzeBinary?api-version=2025-11-01",
-        endpoint, analyzer_id
-    );
-
-    let bytes = fs::read(Path::new(file_path)).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            "File not found.".to_string()
-        } else {
-            format!("Could not read file: {}", e)
-        }
-    })?;
-
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let response = client
-        .post(&url)
-        .header("Ocp-Apim-Subscription-Key", &key)
-        .header("Content-Type", guess_mime_type(file_path))
-        .body(bytes)
-        .send()
-        .map_err(|e| {
-            if e.is_connect() || e.is_timeout() {
-                "Check your internet connection and try again."
-            } else {
-                "Network error."
-            }
-            .to_string()
-        })?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().unwrap_or_default();
-        return Err(format!(
-            "OCR failed ({}): {}",
-            status,
-            if body.is_empty() {
-                "Invalid key or endpoint?"
-            } else {
-                body.as_str()
-            }
-        ));
-    }
-
-    let get_result_url = response
-        .headers()
-        .get("Operation-Location")
-        .and_then(|v| v.to_str().ok())
-        .ok_or("No Operation-Location in response")?
-        .to_string();
-
-    for _ in 0..120 {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        let poll_resp = client
-            .get(&get_result_url)
-            .header("Ocp-Apim-Subscription-Key", &key)
-            .send()
-            .map_err(|e| e.to_string())?;
-        let poll_json: serde_json::Value =
-            poll_resp.json().map_err(|e| format!("Invalid JSON: {}", e))?;
+    for _ in 0..1 {
+        let poll_json = poll_json_outer.clone();
         let status_str = poll_json
             .get("status")
             .and_then(|s| s.as_str())
             .unwrap_or("");
         if status_str.eq_ignore_ascii_case("succeeded") {
-            // RAW AZURE PAYLOAD — before any parsing or frontend state touches it
-            if let Ok(pretty) = serde_json::to_string_pretty(&poll_json) {
-                eprintln!("=== RAW AZURE PAYLOAD ===\n{}", pretty);
-            }
             let result = poll_json
                 .get("result")
                 .or_else(|| poll_json.get("analyzeResult"))
                 .ok_or("No result")?;
+
+            // How many logical documents did Azure detect in this file?
+            // If >1, the PDF likely contains multiple invoices/pages that should be split.
+            let document_count_val = result
+                .get("contents")
+                .and_then(|c| c.as_array().map(|a| a.len() as u32))
+                .or_else(|| {
+                    result
+                        .get("documents")
+                        .and_then(|d| d.as_array().map(|a| a.len() as u32))
+                })
+                .unwrap_or(1);
+            let document_count = if document_count_val > 1 {
+                Some(document_count_val)
+            } else {
+                None
+            };
+
             // Content Understanding uses result.contents[0]; legacy Document Intelligence used analyzeResult.documents[0].
             // Some APIs return the document at result level with result.fields directly.
             let doc = result
@@ -1085,27 +1065,6 @@ pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<O
             // - prebuilt-read: returns content (text content)
             let doc_obj = doc.and_then(|d| d.as_object());
             let fields_obj = doc_obj.and_then(|d| d.get("fields").and_then(|f| f.as_object()));
-
-            #[cfg(debug_assertions)]
-            {
-                let has_contents = result.get("contents").and_then(|c| c.as_array()).map(|a| a.len()).unwrap_or(0);
-                let has_doc = doc.is_some();
-                let field_count = fields_obj.as_ref().map(|o| o.len()).unwrap_or(0);
-                let analyzer_id_used = result.get("analyzerId").and_then(|a| a.as_str()).unwrap_or("(none)");
-                eprintln!(
-                    "[ocr] analyzer_id={} contents_len={} has_doc={} fields_key_count={}",
-                    analyzer_id_used, has_contents, has_doc, field_count
-                );
-                if field_count > 0 {
-                    let fo = fields_obj.as_ref().unwrap();
-                    let keys: Vec<&str> = fo.keys().map(|s| s.as_str()).collect();
-                    eprintln!("[ocr] field keys (first 20): {:?}", &keys[..keys.len().min(20)]);
-                    if let Some(v) = fo.get("sellerName") {
-                        let ty = if v.is_object() { "object" } else if v.is_string() { "string" } else if v.is_number() { "number" } else { "other" };
-                        eprintln!("[ocr] sellerName value type: {} (extracted: {:?})", ty, extract_azure_field_value(v).chars().take(30).collect::<String>());
-                    }
-                }
-            }
             
             // Handle prebuilt-layout model (smetka - Tax Balance Sheet)
             if fields_obj.is_none() && document_type == Some("smetka") {
@@ -1166,6 +1125,7 @@ pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<O
                     return Ok(OcrInvoiceResult {
                         invoice_data: InvoiceData { fields, source_file: None, source_file_path: None },
                         raw_azure_fields: None,
+                        document_count,
                     });
                 }
             }
@@ -1205,46 +1165,19 @@ pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<O
                     return Ok(OcrInvoiceResult {
                         invoice_data: InvoiceData { fields, source_file: None, source_file_path: None },
                         raw_azure_fields: None,
+                        document_count,
                     });
                 }
                 // If no content either, return empty result
                 return Ok(OcrInvoiceResult {
                     invoice_data: InvoiceData { fields: HashMap::new(), source_file: None, source_file_path: None },
                     raw_azure_fields: None,
+                    document_count,
                 });
             }
             
             let fields_obj = fields_obj.unwrap();
             let raw_azure_fields = doc.and_then(|d| d.get("fields")).cloned();
-
-            // Debug logging for key Azure fields (only in debug builds).
-            #[cfg(debug_assertions)]
-            if let Some(d) = doc {
-                if let Some(vendor_field) = d.get("fields").and_then(|f| f.get("VendorName")) {
-                    let field_type = vendor_field.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
-                    let content = vendor_field.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                    let value_string = vendor_field.get("valueString").and_then(|v| v.as_str()).unwrap_or("");
-                    let confidence = vendor_field.get("confidence").and_then(|c| c.as_f64());
-                    eprintln!(
-                        "[ocr] DEBUG VendorName field: type={}, content={:?}, valueString={:?}, confidence={:?}",
-                        field_type, content, value_string, confidence
-                    );
-                } else {
-                    eprintln!("[ocr] DEBUG VendorName field not found in Azure response!");
-                }
-                if let Some(customer_field) = d.get("fields").and_then(|f| f.get("CustomerName")) {
-                    let field_type = customer_field.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
-                    let content = customer_field.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                    let value_string = customer_field.get("valueString").and_then(|v| v.as_str()).unwrap_or("");
-                    let confidence = customer_field.get("confidence").and_then(|c| c.as_f64());
-                    eprintln!(
-                        "[ocr] DEBUG CustomerName field: type={}, content={:?}, valueString={:?}, confidence={:?}",
-                        field_type, content, value_string, confidence
-                    );
-                } else {
-                    eprintln!("[ocr] DEBUG CustomerName field not found in Azure response!");
-                }
-            }
 
             let mut fields = HashMap::new();
 
@@ -1559,6 +1492,7 @@ pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<O
                     ("totalTaxBase", "net_amount"),
                     ("totalOutputVat", "tax_amount"),
                     ("vatPayableOrRefund", "total_amount"),
+                    ("description", "description"),
                 ];
                 for (cu_key, our_key) in ddv_mappings {
                     if let Some(obj) = fields_obj.get(*cu_key) {
@@ -1571,6 +1505,60 @@ pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<O
                             fields.insert(
                                 (*our_key).to_string(),
                                 InvoiceFieldValue { value: value.to_string(), confidence },
+                            );
+                        }
+                    }
+                }
+
+                // Map all DDV box fields (01–19, 21–31) into our canonical keys so that:
+                // - BatchReview schema (DDV_FIELDS) gets full per-box values
+                // - Excel export can write each box column directly.
+                let ddv_box_keys: &[&str] = &[
+                    // 01–19: promет на добра и услуги (acc.# 230)
+                    "prometOpshtaStapkaOsnova",
+                    "prometOpshtaStapkaDDV",
+                    "prometPovlastenaStapka10Osnova",
+                    "prometPovlastenaStapka10DDV",
+                    "prometPovlastenaStapka5Osnova",
+                    "prometPovlastenaStapka5DDV",
+                    "izvoz",
+                    "oslobodenSOPravoNaOdbivka",
+                    "oslobodenBezPravoNaOdbivka",
+                    "prometNerezidentiNeOdanocliv",
+                    "prometPrenesuvanjeDanocnaObvrska",
+                    "primenPrometNerezidentiOpshtaOsnova",
+                    "primenPrometNerezidentiOpshtaDDV",
+                    "primenPrometNerezidentiPovlastenaOsnova",
+                    "primenPrometNerezidentiPovlastenaDDV",
+                    "primenPrometZemjaOpshtaOsnova",
+                    "primenPrometZemjaOpshtaDDV",
+                    "primenPrometZemjaPovlastenaOsnova",
+                    "primenPrometZemjaPovlastenaDDV",
+                    // 21–31: влезни испораки (acc.# 130)
+                    "vlezenPrometOsnova",
+                    "vlezenPrometDDV",
+                    "vlezenPrometPrijamatelStranstvoOsnova",
+                    "vlezenPrometPrijamatelStranstvoDDV",
+                    "vlezenPrometPrijamatelZemjaOsnova",
+                    "vlezenPrometPrijamatelZemjaDDV",
+                    "uvozOsnova",
+                    "uvozDDV",
+                    "prethodniDanociZaOdbivanje",
+                    "ostanatiDanociIznosiZaOdbivanje",
+                    "danochenDolgIliPobaruvanje",
+                ];
+                for key in ddv_box_keys {
+                    if let Some(obj) = fields_obj.get(*key) {
+                        let (value, confidence) = extract_field_value_and_confidence(obj);
+                        let value = value.trim();
+                        // Preserve zeros; skip only when completely empty / missing.
+                        if !value.is_empty() || value == "0" {
+                            fields.insert(
+                                (*key).to_string(),
+                                InvoiceFieldValue {
+                                    value: if value.is_empty() { "0".to_string() } else { value.to_string() },
+                                    confidence,
+                                },
                             );
                         }
                     }
@@ -1619,29 +1607,207 @@ pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<O
                 }
 
                 // Flatten periodRows (VAT period table) so UI can show them
+                // and, when box totals are missing, derive them by summing all months.
+                use std::collections::HashMap as StdHashMap;
+                let mut ddv_totals: StdHashMap<String, f64> = StdHashMap::new();
+
                 if let Some(rows_val) = fields_obj.get("periodRows") {
                     if let Some(arr) = rows_val.get("valueArray").and_then(|v| v.as_array()) {
                         for (idx, item) in arr.iter().enumerate() {
                             if let Some(val_obj) = item.get("valueObject").and_then(|v| v.as_object()) {
                                 for (sub_key, sub_val) in val_obj {
+                                    // 1) Keep full periodRows_* fields for debug/advanced use.
                                     if let Some(v_str) = sub_val.get("valueString").and_then(|v| v.as_str()) {
                                         let v = v_str.trim();
                                         if !v.is_empty() {
                                             fields.insert(
                                                 format!("periodRows_{}_{}", idx, sub_key),
-                                                InvoiceFieldValue { value: v.to_string(), confidence: sub_val.get("confidence").and_then(|c| c.as_f64()) },
+                                                InvoiceFieldValue {
+                                                    value: v.to_string(),
+                                                    confidence: sub_val.get("confidence").and_then(|c| c.as_f64()),
+                                                },
                                             );
                                         }
                                     } else if let Some(n) = sub_val.get("valueNumber").and_then(|v| v.as_f64()) {
                                         fields.insert(
                                             format!("periodRows_{}_{}", idx, sub_key),
-                                            InvoiceFieldValue { value: n.to_string(), confidence: sub_val.get("confidence").and_then(|c| c.as_f64()) },
+                                            InvoiceFieldValue {
+                                                value: n.to_string(),
+                                                confidence: sub_val.get("confidence").and_then(|c| c.as_f64()),
+                                            },
                                         );
+                                    }
+
+                                    // 2) If this column is one of the DDV box keys, accumulate totals across all months.
+                                    if ddv_box_keys.iter().any(|k| k == &sub_key.as_str()) {
+                                        let mut numeric: Option<f64> = sub_val
+                                            .get("valueNumber")
+                                            .and_then(|v| v.as_f64());
+                                        if numeric.is_none() {
+                                            if let Some(v_str) = sub_val.get("valueString").and_then(|v| v.as_str())
+                                            {
+                                                let cleaned = v_str
+                                                    .trim()
+                                                    .replace('.', "")
+                                                    .replace(',', ".");
+                                                if let Ok(n) = cleaned.parse::<f64>() {
+                                                    numeric = Some(n);
+                                                }
+                                            }
+                                        }
+                                        if let Some(n) = numeric {
+                                            let entry = ddv_totals
+                                                .entry(sub_key.clone())
+                                                .or_insert(0.0);
+                                            *entry += n;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                }
+
+                // Backfill DDV box totals when direct fields are missing or empty.
+                for (k, total) in ddv_totals {
+                    let key = k.to_string();
+                    let needs_fill = match fields.get(&key) {
+                        None => true,
+                        Some(existing) => existing.value.trim().is_empty(),
+                    };
+                    if needs_fill {
+                        fields.insert(
+                            key,
+                            InvoiceFieldValue {
+                                value: format!("{}", total),
+                                confidence: None,
+                            },
+                        );
+                    }
+                }
+
+                // Compute summary fields from box values when analyzer does not return them.
+                let total_tax_base_keys: &[&str] = &[
+                    "prometOpshtaStapkaOsnova",
+                    "prometPovlastenaStapka10Osnova",
+                    "prometPovlastenaStapka5Osnova",
+                    "izvoz",
+                    "oslobodenSOPravoNaOdbivka",
+                    "oslobodenBezPravoNaOdbivka",
+                    "prometNerezidentiNeOdanocliv",
+                    "prometPrenesuvanjeDanocnaObvrska",
+                    "primenPrometNerezidentiOpshtaOsnova",
+                    "primenPrometNerezidentiPovlastenaOsnova",
+                    "primenPrometZemjaOpshtaOsnova",
+                    "primenPrometZemjaPovlastenaOsnova",
+                ];
+                let total_output_vat_keys: &[&str] = &[
+                    "prometOpshtaStapkaDDV",
+                    "prometPovlastenaStapka10DDV",
+                    "prometPovlastenaStapka5DDV",
+                    "primenPrometNerezidentiOpshtaDDV",
+                    "primenPrometNerezidentiPovlastenaDDV",
+                    "primenPrometZemjaOpshtaDDV",
+                    "primenPrometZemjaPovlastenaDDV",
+                ];
+                let total_input_vat_keys: &[&str] = &[
+                    "vlezenPrometDDV",
+                    "vlezenPrometPrijamatelStranstvoDDV",
+                    "vlezenPrometPrijamatelZemjaDDV",
+                    "uvozDDV",
+                ];
+
+                let has_any_data = fields.values().any(|v| !v.value.trim().is_empty());
+
+                if !fields.contains_key("totalTaxBase") || fields.get("totalTaxBase").map(|f| f.value.trim().is_empty()).unwrap_or(true) {
+                    let sum: f64 = total_tax_base_keys
+                        .iter()
+                        .map(|k| fields.get(*k).map(|f| parse_ddv_amt(&f.value)).unwrap_or(0.0))
+                        .sum();
+                    if sum != 0.0 || has_any_data {
+                        fields.insert(
+                            "totalTaxBase".to_string(),
+                            InvoiceFieldValue {
+                                value: format!("{}", sum as i64),
+                                confidence: None,
+                            },
+                        );
+                    }
+                }
+
+                if !fields.contains_key("totalOutputVat") || fields.get("totalOutputVat").map(|f| f.value.trim().is_empty()).unwrap_or(true) {
+                    let sum: f64 = total_output_vat_keys
+                        .iter()
+                        .map(|k| fields.get(*k).map(|f| parse_ddv_amt(&f.value)).unwrap_or(0.0))
+                        .sum();
+                    if sum != 0.0 || has_any_data {
+                        fields.insert(
+                            "totalOutputVat".to_string(),
+                            InvoiceFieldValue {
+                                value: format!("{}", sum as i64),
+                                confidence: None,
+                            },
+                        );
+                    }
+                }
+
+                if !fields.contains_key("totalInputVat") || fields.get("totalInputVat").map(|f| f.value.trim().is_empty()).unwrap_or(true) {
+                    let sum: f64 = total_input_vat_keys
+                        .iter()
+                        .map(|k| fields.get(*k).map(|f| parse_ddv_amt(&f.value)).unwrap_or(0.0))
+                        .sum();
+                    if sum != 0.0 || has_any_data {
+                        fields.insert(
+                            "totalInputVat".to_string(),
+                            InvoiceFieldValue {
+                                value: format!("{}", sum as i64),
+                                confidence: None,
+                            },
+                        );
+                    }
+                }
+
+                if !fields.contains_key("vatPayableOrRefund") || fields.get("vatPayableOrRefund").map(|f| f.value.trim().is_empty()).unwrap_or(true) {
+                    let box31 = fields.get("danochenDolgIliPobaruvanje").map(|f| parse_ddv_amt(&f.value)).unwrap_or(0.0);
+                    let out = fields.get("totalOutputVat").map(|f| parse_ddv_amt(&f.value)).unwrap_or(0.0);
+                    let inp = fields.get("totalInputVat").map(|f| parse_ddv_amt(&f.value)).unwrap_or(0.0);
+                    let value = if box31 != 0.0 {
+                        box31
+                    } else if out != 0.0 || inp != 0.0 {
+                        out - inp
+                    } else {
+                        0.0
+                    };
+                    if value != 0.0 || box31 != 0.0 || out != 0.0 || inp != 0.0 {
+                        fields.insert(
+                            "vatPayableOrRefund".to_string(),
+                            InvoiceFieldValue {
+                                value: format!("{}", value as i64),
+                                confidence: None,
+                            },
+                        );
+                    }
+                }
+
+                // Default Опис (description) when empty so the card and export have a label.
+                let desc_empty = fields
+                    .get("description")
+                    .map(|f| f.value.trim().is_empty())
+                    .unwrap_or(true);
+                if desc_empty {
+                    let period = fields.get("taxPeriod").map(|f| f.value.as_str()).unwrap_or("");
+                    let default_desc = if period.is_empty() {
+                        "ДДВ извештај".to_string()
+                    } else {
+                        format!("ДДВ извештај – {}", period)
+                    };
+                    fields.insert(
+                        "description".to_string(),
+                        InvoiceFieldValue {
+                            value: default_desc,
+                            confidence: None,
+                        },
+                    );
                 }
             }
 
@@ -1706,25 +1872,35 @@ pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<O
                         },
                     );
                 }
-                // Map declarationPeriod → year (used by Excel profiles and cards) and set a canonical date.
+                // Map declarationPeriod → year (used by Excel profiles and cards) and keep declarationPeriod for schema.
                 if let Some(obj) = fields_obj.get("declarationPeriod") {
                     let (value, confidence) = extract_field_value_and_confidence(obj);
                     let value = value.trim();
                     if !value.is_empty() {
-                        fields.insert(
-                            "year".to_string(),
-                            InvoiceFieldValue {
-                                value: value.to_string(),
-                                confidence,
-                            },
-                        );
-                        fields.insert(
-                            "date".to_string(),
-                            InvoiceFieldValue {
-                                value: value.to_string(),
-                                confidence,
-                            },
-                        );
+                        let fv = InvoiceFieldValue { value: value.to_string(), confidence };
+                        fields.insert("declarationPeriod".to_string(), fv.clone());
+                        fields.insert("year".to_string(), fv.clone());
+                        fields.insert("date".to_string(), fv);
+                    }
+                }
+                // Copy companyName, companyTaxId, brojVraboteni from analyzer into fields (Plata schema).
+                for (cu_key, our_key) in &[
+                    ("companyName", "companyName"),
+                    ("companyTaxId", "companyTaxId"),
+                    ("brojVraboteni", "brojVraboteni"),
+                ] {
+                    if let Some(obj) = fields_obj.get(*cu_key) {
+                        let (value, confidence) = extract_field_value_and_confidence(obj);
+                        let value = value.trim();
+                        if !value.is_empty() || (value == "0" && *our_key == "brojVraboteni") {
+                            fields.insert(
+                                (*our_key).to_string(),
+                                InvoiceFieldValue {
+                                    value: if value.is_empty() { "0".to_string() } else { value.to_string() },
+                                    confidence,
+                                },
+                            );
+                        }
                     }
                 }
 
@@ -1994,23 +2170,10 @@ pub fn run_ocr_invoice(file_path: &str, document_type: Option<&str>) -> Result<O
                 };
                 fields.insert(canonical_key, InvoiceFieldValue { value, confidence });
             }
-            #[cfg(debug_assertions)]
-            {
-                if let Some(f) = fields.get("seller_name") {
-                    let s = &f.value;
-                    // Use character-based truncation to avoid slicing in the middle of a multi-byte (e.g. Cyrillic) character.
-                    let mut preview: String = s.chars().take(50).collect();
-                    if s.chars().count() > 50 {
-                        preview.push_str("...");
-                    }
-                    eprintln!("[ocr] extracted fields count={} seller_name={:?}", fields.len(), preview);
-                } else {
-                    eprintln!("[ocr] extracted fields count={} seller_name=(missing)", fields.len());
-                }
-            }
             return Ok(OcrInvoiceResult {
                 invoice_data: InvoiceData { fields, source_file: None, source_file_path: None },
                 raw_azure_fields,
+                document_count,
             });
         }
         if status_str.eq_ignore_ascii_case("failed") {

@@ -69,6 +69,10 @@ pub struct OcrInvoiceResult {
     /// Raw result.contents[0].fields from Azure (for frontend parseAzureExtraction and debug logging).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_azure_fields: Option<serde_json::Value>,
+    /// Total number of documents Azure detected in this file (1 = normal case).
+    /// When >1, frontend can warn that the PDF likely contains multiple invoices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_count: Option<u32>,
 }
 
 /// Information about a failed scan attempt.

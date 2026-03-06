@@ -140,7 +140,11 @@ export const ANALYZER_FIELD_INPUT_TYPE: Record<string, "text" | "date" | "amount
   prethodniDanociZaOdbivanje: "amount",
   ostanatiDanociIznosiZaOdbivanje: "amount",
   danochenDolgIliPobaruvanje: "amount",
-  // Плати (MacedonianPayrollAnalyzer)
+  // Плати (MacedonianPayrollAnalyzer / MacedonianPayrollAnalyzer.json)
+  companyName: "text",
+  companyTaxId: "text",
+  declarationPeriod: "text",
+  brojVraboteni: "amount",
   brutoPlata: "amount",
   pridonesPIO: "amount",
   pridonesZdravstvo: "amount",
@@ -149,10 +153,6 @@ export const ANALYZER_FIELD_INPUT_TYPE: Record<string, "text" | "date" | "amount
   personalenDanok: "amount",
   vkupnaNetoPlata: "amount",
   // Legacy payroll summary keys (still supported)
-  totalTaxBase: "amount",
-  totalOutputVat: "amount",
-  totalInputVat: "amount",
-  vatPayableOrRefund: "amount",
   totalGrossSalary: "amount",
   totalNetSalary: "amount",
   totalPayrollCost: "amount",
@@ -212,6 +212,7 @@ export const ALL_AMOUNT_KEYS = new Set<string>([
   "ostanatiDanociIznosiZaOdbivanje",
   "danochenDolgIliPobaruvanje",
   // Плати analyzer (new + legacy)
+  "brojVraboteni",
   "brutoPlata",
   "pridonesPIO",
   "pridonesZdravstvo",
@@ -348,19 +349,20 @@ export const DDV_FIELD_LABELS_MK: Record<string, string> = {
   description: "Опис",
 };
 
-/** Labels for Плати (Payroll) analyzer fields. */
+/** Labels for Плати (Payroll) — matches MacedonianPayrollAnalyzer.json and РД-Трошоци за вработени Excel. */
 export const PAYROLL_FIELD_LABELS_MK: Record<string, string> = {
   year: "Година",
-  companyName: "Назив на компанија",
-  // New analyzer fields (row-wise totals from MPIN)
+  companyName: "Име на компанија",
+  companyTaxId: "Идентификационен број / ЕДБ",
+  declarationPeriod: "Период за кој се поднесува (месец/година)",
+  brojVraboteni: "Број на вработени за кои се пресметува плата",
   brutoPlata: "Бруто плата (Бруто 2)",
   pridonesPIO: "Придонес за ПИО",
   pridonesZdravstvo: "Придонес за здравство",
   pridonesProfesionalnoZaboluvanje: "Придонес за профес. здравствено осигурување",
   pridonesVrabotuvanje: "Придонес за вработување",
   personalenDanok: "Персонален данок",
-  vkupnaNetoPlata: "Вкупна нето плата",
-  // Legacy summary totals (kept for history / older scans)
+  vkupnaNetoPlata: "Вкупно нето ефективна плата по декларација",
   totalGrossSalary: "Вкупно бруто плата",
   totalNetSalary: "Вкупно нето плата",
   totalPayrollCost: "Вкупни трошоци за вработени",

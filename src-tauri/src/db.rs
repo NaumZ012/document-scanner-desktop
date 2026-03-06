@@ -1035,42 +1035,51 @@ impl Db {
             }
         }
 
-    // -------- Payroll template --------
-    let payroll_src = examples_root
-        .as_ref()
-        .map(|r| r.join("Плати").join("РД-Трошоци за вработени-Example.xlsx"));
+    // -------- Payroll template (Плати): prefer repo example so export matches desired layout; no Settings change required --------
     let payroll_dst = templates_dir.join("Plati-Template.xlsx");
-    if let Some(payroll_src) = payroll_src {
-        if payroll_src.exists() && !payroll_dst.exists() {
-            let _ = fs::copy(&payroll_src, &payroll_dst);
-        }
-    }
-        if payroll_dst.exists() && !profile_exists_by_name(&*conn, "Плати — шаблон") {
-            let sheet = excel::get_sheet_names(payroll_dst.to_str().unwrap())?.get(0).cloned().unwrap_or_else(|| "Sheet1".to_string());
-            let headers = excel::get_excel_headers(payroll_dst.to_str().unwrap(), &sheet, 1)?;
-            let mut header_to_key: HashMap<String, String> = HashMap::new();
-            header_to_key.insert(norm_header("Година"), "year".to_string());
-            header_to_key.insert(norm_header("Назив на компанија"), "companyName".to_string());
-            header_to_key.insert(norm_header("Вкупно бруто плата"), "totalGrossSalary".to_string());
-            header_to_key.insert(norm_header("Вкупно нето плата"), "totalNetSalary".to_string());
-            header_to_key.insert(norm_header("Вкупни трошоци за вработени"), "totalPayrollCost".to_string());
-            header_to_key.insert(norm_header("Опис"), "description".to_string());
-            let mapping = build_mapping_from_headers(
-                headers.into_iter().map(|h| (h.column_letter, h.header_text)),
-                &header_to_key,
-                1,
-            );
+    let _ = excel::create_plata_template_xlsx(payroll_dst.to_str().unwrap());
+    let (plati_path, plati_sheet) = examples_root
+        .as_ref()
+        .map(|r| r.join("Плати").join("РД-Трошоци за вработени-Example.xlsx"))
+        .filter(|p| p.exists())
+        .map(|p| (p.to_string_lossy().to_string(), "Пресметка на плата".to_string()))
+        .unwrap_or_else(|| {
+            (
+                payroll_dst.to_string_lossy().to_string(),
+                "МПИН".to_string(),
+            )
+        });
+    let plati_headers = std::path::Path::new(&plati_path).exists().then(|| {
+        excel::get_excel_headers(&plati_path, &plati_sheet, 2).ok()
+            .or_else(|| excel::get_excel_headers(&plati_path, "МПИН", 2).ok())
+            .or_else(|| excel::get_excel_headers(&plati_path, "Пресметка на плата", 2).ok())
+    }).flatten();
+    let plati_header_to_key: HashMap<String, String> = HashMap::new();
+
+    if let Some(headers) = plati_headers {
+        let plati_mapping = build_mapping_from_headers(
+            headers.into_iter().map(|h| (h.column_letter, h.header_text)),
+            &plati_header_to_key,
+            2,
+        );
+        if !profile_exists_by_name(&*conn, "Плати — шаблон") {
             conn.execute(
                 "INSERT INTO profiles (name, excel_path, sheet_name, column_mapping) VALUES (?, ?, ?, ?)",
                 params![
                     "Плати — шаблон",
-                    payroll_dst.to_string_lossy().to_string(),
-                    sheet,
-                    mapping
+                    plati_path,
+                    plati_sheet,
+                    plati_mapping
                 ],
             )
             .map_err(|e| e.to_string())?;
+        } else {
+            let _ = conn.execute(
+                "UPDATE profiles SET excel_path = ?, sheet_name = ?, column_mapping = ? WHERE name = ?",
+                params![plati_path, plati_sheet, plati_mapping, "Плати — шаблон"],
+            );
         }
+    }
 
         // -------- DDV template (.xlsx) --------
         let ddv_dst = templates_dir.join("DDV-Template.xlsx");
