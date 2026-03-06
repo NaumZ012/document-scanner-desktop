@@ -55,8 +55,8 @@ export function AuthPage() {
           metadata: { mode: "signUp" },
         });
       }
-      // On successful auth, go to employee screen
-      setScreen("employee");
+      // On successful auth, go directly to the app
+      setScreen("home");
     } finally {
       setLoading(false);
     }

@@ -9,7 +9,7 @@ interface EmployeeRow {
   name: string;
 }
 
-const NETWORK_TIMEOUT_MS = 15000;
+const NETWORK_TIMEOUT_MS = 10000;
 
 function withTimeout<T>(p: PromiseLike<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {

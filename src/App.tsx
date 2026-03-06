@@ -11,7 +11,6 @@ import styles from "./App.module.css";
 
 const HomePage = lazy(() => import("@/pages/Home").then((m) => ({ default: m.Home })));
 const AuthPage = lazy(() => import("@/pages/Auth").then((m) => ({ default: m.AuthPage })));
-const EmployeePage = lazy(() => import("@/pages/Employee").then((m) => ({ default: m.EmployeePage })));
 const Review = lazy(() => import("@/pages/Review").then((m) => ({ default: m.Review })));
 const BatchReview = lazy(() => import("@/pages/BatchReview").then((m) => ({ default: m.BatchReview })));
 const HistoryPage = lazy(() => import("@/pages/History").then((m) => ({ default: m.History })));
@@ -113,10 +112,10 @@ function AppContent() {
   }
 
   if (user && screen === "auth") {
-    setScreen("employee");
+    setScreen("home");
   }
 
-  const fullScreenAuthLayout = screen === "employee" || screen === "profile";
+  const fullScreenAuthLayout = screen === "profile";
   if (!isAdmin && screen === "admin") {
     setScreen("home");
   }
@@ -198,7 +197,6 @@ function AppContent() {
       <main className={styles.main}>
         <Suspense fallback={<div className={styles.loading}>Loading…</div>}>
           {screen === "auth" && <AuthPage />}
-          {screen === "employee" && <EmployeePage />}
           {screen === "home" && <HomePage />}
           {screen === "review" && <Review />}
           {screen === "batchReview" && <BatchReview />}

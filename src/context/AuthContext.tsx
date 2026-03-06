@@ -24,6 +24,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  const AUTH_TIMEOUT_MS = 10000;
+
+  const withAuthTimeout = async <T,>(promise: Promise<T>, message: string): Promise<T> =>
+    await new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(message));
+      }, AUTH_TIMEOUT_MS);
+      promise
+        .then((value) => {
+          clearTimeout(timer);
+          resolve(value);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+
   useEffect(() => {
     if (!supabase) {
       setLoading(false);
@@ -121,32 +139,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp: AuthContextValue["signUp"] = async ({ email, password, fullName }) => {
     const client = getSupabaseClient();
     if (!client) return { error: "Supabase is not configured." };
-    const { error } = await client.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-        },
-      },
-    });
-    if (error) {
-      return { error: error.message };
+    try {
+      const { error } = await withAuthTimeout(
+        client.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: fullName,
+            },
+          },
+        }),
+        "Sign up timed out. Please check your internet connection and try again.",
+      );
+      if (error) {
+        return { error: error.message };
+      }
+      return {};
+    } catch (e) {
+      if (e instanceof Error) {
+        return { error: e.message };
+      }
+      return { error: "Sign up failed. Please try again." };
     }
-    return {};
   };
 
   const signIn: AuthContextValue["signIn"] = async ({ email, password }) => {
     const client = getSupabaseClient();
     if (!client) return { error: "Supabase is not configured." };
-    const { error } = await client.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) {
-      return { error: error.message };
+    try {
+      const { error } = await withAuthTimeout(
+        client.auth.signInWithPassword({
+          email,
+          password,
+        }),
+        "Sign in timed out. Please check your internet connection and try again.",
+      );
+      if (error) {
+        return { error: error.message };
+      }
+      return {};
+    } catch (e) {
+      if (e instanceof Error) {
+        return { error: e.message };
+      }
+      return { error: "Sign in failed. Please try again." };
     }
-    return {};
   };
 
   const signOut = async () => {

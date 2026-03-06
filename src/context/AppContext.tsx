@@ -5,7 +5,6 @@ import type { DocumentType } from "@/shared/types";
 
 export type Screen =
   | "auth"
-  | "employee"
   | "home"
   | "review"
   | "history"
