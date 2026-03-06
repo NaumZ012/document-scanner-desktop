@@ -17,21 +17,42 @@ function getIpAddress(req: Request): string | null {
   return null;
 }
 
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function text(status: number, body: string): Response {
+  return new Response(body, {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
+function json(status: number, data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return text(405, "Method not allowed");
 
   const url = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!url || !anonKey) return new Response("Server not configured", { status: 500 });
+  if (!url || !anonKey) return text(500, "Server not configured");
 
   const authHeader = req.headers.get("Authorization") ?? "";
-  if (!authHeader.startsWith("Bearer ")) return new Response("Unauthorized", { status: 401 });
+  if (!authHeader.startsWith("Bearer ")) return text(401, "Unauthorized");
 
   let body: StartSessionRequest;
   try {
     body = (await req.json()) as StartSessionRequest;
   } catch {
-    return new Response("Invalid JSON", { status: 400 });
+    return text(400, "Invalid JSON");
   }
 
   const supabase = createClient(url, anonKey, {
@@ -40,7 +61,7 @@ Deno.serve(async (req) => {
   });
 
   const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userData.user) return new Response("Unauthorized", { status: 401 });
+  if (userErr || !userData.user) return text(401, "Unauthorized");
   const ownerId = userData.user.id;
 
   const ip = getIpAddress(req);
@@ -48,7 +69,7 @@ Deno.serve(async (req) => {
 
   const mode = body?.mode;
   if (mode !== "skip" && mode !== "existing" && mode !== "new") {
-    return new Response("Invalid mode", { status: 400 });
+    return text(400, "Invalid mode");
   }
 
   let employeeId: string | null = null;
@@ -60,27 +81,27 @@ Deno.serve(async (req) => {
   } else if (mode === "new") {
     const name = String(body?.name ?? "").trim();
     const pin = String(body?.pin ?? "").trim();
-    if (!name || !pin) return new Response("Name and PIN are required", { status: 400 });
+    if (!name || !pin) return text(400, "Name and PIN are required");
 
     const { data, error } = await supabase.rpc("create_employee", {
       p_name: name,
       p_pin: pin,
     });
-    if (error || !data) return new Response("Failed to create employee", { status: 500 });
+    if (error || !data) return text(500, "Failed to create employee");
 
     employeeId = String(data);
     employeeName = name;
   } else {
     const empId = String(body?.employee_id ?? "").trim();
     const pin = String(body?.pin ?? "").trim();
-    if (!empId || !pin) return new Response("Employee and PIN are required", { status: 400 });
+    if (!empId || !pin) return text(400, "Employee and PIN are required");
 
     const { data: ok, error } = await supabase.rpc("verify_employee_pin", {
       p_employee_id: empId,
       p_pin: pin,
     });
 
-    if (error) return new Response("PIN verification failed", { status: 500 });
+    if (error) return text(500, "PIN verification failed");
 
     if (!ok) {
       // Audit failed attempt
@@ -91,7 +112,7 @@ Deno.serve(async (req) => {
         user_agent: userAgent,
         metadata: { employee_id: empId },
       });
-      return new Response("Incorrect PIN", { status: 401 });
+      return text(401, "Incorrect PIN");
     }
 
     // Load employee name (never pin_hash)
@@ -123,16 +144,16 @@ Deno.serve(async (req) => {
     .select("id")
     .single();
 
-  if (sessionErr || !sessionRow?.id) return new Response("Failed to create session", { status: 500 });
+  if (sessionErr || !sessionRow?.id) return text(500, "Failed to create session");
 
-  const resp = {
+  const resp: {
+    app_session_id: string;
+    employee: { id: string; name: string } | null;
+  } = {
     app_session_id: sessionRow.id as string,
     employee: employeeId ? { id: employeeId, name: employeeName ?? "Employee" } : null,
   };
 
-  return new Response(JSON.stringify(resp), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+  return json(200, resp);
 });
 

@@ -1,12 +1,30 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useApp } from "@/context/AppContext";
-import { getSupabaseClient, getSupabaseEnv } from "@/services/supabaseClient";
+import { getSupabaseClient } from "@/services/supabaseClient";
 import styles from "./Auth.module.css";
 
 interface EmployeeRow {
   id: string;
   name: string;
+}
+
+const NETWORK_TIMEOUT_MS = 15000;
+
+function withTimeout<T>(p: PromiseLike<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
 }
 
 export function EmployeePage() {
@@ -32,11 +50,15 @@ export function EmployeePage() {
     let active = true;
     (async () => {
       try {
-        const { data, error } = await supabase
-          .from("employees")
-          .select("*")
-          .eq("owner_id", user.id)
-          .order("created_at", { ascending: false });
+        const { data, error } = await withTimeout(
+          supabase
+            .from("employees")
+            .select("*")
+            .eq("owner_id", user.id)
+            .order("created_at", { ascending: false }),
+          NETWORK_TIMEOUT_MS,
+          "Employee list timed out. Please check your internet connection and try again.",
+        );
         if (!active) return;
         if (error) {
           setEmployees([]);
@@ -44,6 +66,14 @@ export function EmployeePage() {
           const rows = (Array.isArray(data) ? data : []) as Array<{ id: string; name: string }>;
           setEmployees(rows.map((r) => ({ id: r.id, name: r.name })));
         }
+      } catch (e) {
+        if (!active) return;
+        setEmployees([]);
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Could not load employees. Please check your internet connection and try again.",
+        );
       } finally {
         if (active) setLoadingList(false);
       }
@@ -58,13 +88,13 @@ export function EmployeePage() {
     setError(null);
     setLoading(true);
     try {
-      if (!user || !session?.access_token) {
-        setError("Not authenticated.");
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        setError("Supabase is not configured.");
         return;
       }
-      const env = getSupabaseEnv();
-      if (!env) {
-        setError("Supabase is not configured.");
+      if (!user || !session?.access_token) {
+        setError("Not authenticated.");
         return;
       }
 
@@ -79,34 +109,37 @@ export function EmployeePage() {
         return;
       }
 
-      const res = await fetch(`${env.url}/functions/v1/start_session`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          mode,
-          employee_id: mode === "existing" ? selectedEmployeeId : null,
-          name: mode === "new" ? name.trim() : null,
-          pin: mode === "new" || mode === "existing" ? pin : null,
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke("start_session", {
+          body: {
+            mode,
+            employee_id: mode === "existing" ? selectedEmployeeId : null,
+            name: mode === "new" ? name.trim() : null,
+            pin: mode === "new" || mode === "existing" ? pin : null,
+          },
         }),
-      });
+        NETWORK_TIMEOUT_MS,
+        "Starting session timed out. Please check your internet connection and try again.",
+      );
 
-      if (!res.ok) {
-        const msg = await res.text();
-        setError(msg || "Could not start session.");
+      if (error) {
+        setError(error.message || "Could not start session.");
         return;
       }
 
-      const data = (await res.json()) as {
-        app_session_id: string;
-        employee: { id: string; name: string } | null;
-      };
+      const payload = data as {
+        app_session_id?: string;
+        employee?: { id: string; name: string } | null;
+      } | null;
 
-      setCurrentAppSessionId(data.app_session_id);
-      if (data.employee) {
-        setCurrentSessionUser({ id: data.employee.id, name: data.employee.name });
+      if (!payload?.app_session_id) {
+        setError("Could not start session.");
+        return;
+      }
+
+      setCurrentAppSessionId(payload.app_session_id);
+      if (payload.employee) {
+        setCurrentSessionUser({ id: payload.employee.id, name: payload.employee.name });
       } else {
         setCurrentSessionUser({ id: null, name: "Owner" });
       }

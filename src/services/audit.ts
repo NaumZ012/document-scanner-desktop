@@ -1,4 +1,4 @@
-import { getSupabaseEnv } from "@/services/supabaseClient";
+import { getSupabaseClient } from "@/services/supabaseClient";
 
 export type AuditEventType =
   | "login_success"
@@ -13,20 +13,17 @@ export async function logAuditEvent(params: {
   accessToken?: string | null;
   metadata?: Record<string, unknown> | null;
 }): Promise<void> {
-  const env = getSupabaseEnv();
-  if (!env) return;
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
 
   try {
-    await fetch(`${env.url}/functions/v1/audit_event`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(params.accessToken ? { Authorization: `Bearer ${params.accessToken}` } : {}),
-      },
-      body: JSON.stringify({
+    // Use Edge Function invocation (CORS-friendly in Tauri) and keep this non-blocking by design.
+    await supabase.functions.invoke("audit_event", {
+      headers: params.accessToken ? { Authorization: `Bearer ${params.accessToken}` } : undefined,
+      body: {
         event_type: params.eventType,
         metadata: params.metadata ?? null,
-      }),
+      },
     });
   } catch {
     // Non-blocking by design; audit failures must not break UX.

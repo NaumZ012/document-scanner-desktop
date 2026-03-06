@@ -13,27 +13,46 @@ function getIpAddress(req: Request): string | null {
   return null;
 }
 
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function text(status: number, body: string): Response {
+  return new Response(body, {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
+function json(status: number, data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
 Deno.serve(async (req) => {
-  if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return text(405, "Method not allowed");
 
   const url = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !anonKey || !serviceKey) {
-    return new Response("Server not configured", { status: 500 });
+    return text(500, "Server not configured");
   }
 
   let payload: AuditEventRequest;
   try {
     payload = (await req.json()) as AuditEventRequest;
   } catch {
-    return new Response("Invalid JSON", { status: 400 });
+    return text(400, "Invalid JSON");
   }
 
   const eventType = String(payload?.event_type ?? "").trim();
-  if (!eventType) return new Response("Missing event_type", { status: 400 });
+  if (!eventType) return text(400, "Missing event_type");
 
   const authHeader = req.headers.get("Authorization") ?? "";
 
@@ -66,12 +85,9 @@ Deno.serve(async (req) => {
 
   if (error) {
     // Avoid leaking internal details to clients; caller will show a user-facing message if needed.
-    return new Response("Failed to write audit log", { status: 500 });
+    return text(500, "Failed to write audit log");
   }
 
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+  return json(200, { ok: true });
 });
 
