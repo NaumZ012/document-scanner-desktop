@@ -17,6 +17,7 @@ const HistoryPage = lazy(() => import("@/pages/History").then((m) => ({ default:
 const SettingsPage = lazy(() => import("@/pages/Settings").then((m) => ({ default: m.Settings })));
 const ProfilePage = lazy(() => import("@/pages/Profile").then((m) => ({ default: m.ProfilePage })));
 const AdminPage = lazy(() => import("@/pages/Admin").then((m) => ({ default: m.AdminPage })));
+const EmployeePage = lazy(() => import("@/pages/Employee").then((m) => ({ default: m.EmployeePage })));
 
 function AppContent() {
   const { screen, setScreen, currentSessionUser, setCurrentSessionUser, theme, setTheme } = useApp();
@@ -120,10 +121,10 @@ function AppContent() {
   }
 
   if (user && screen === "auth") {
-    setScreen("home");
+    setScreen("employee");
   }
 
-  const fullScreenAuthLayout = screen === "profile";
+  const fullScreenAuthLayout = screen === "profile" || screen === "employee";
   if (!isAdmin && screen === "admin") {
     setScreen("home");
   }
@@ -205,6 +206,7 @@ function AppContent() {
       <main className={styles.main}>
         <Suspense fallback={<div className={styles.loading}>Loading…</div>}>
           {screen === "auth" && <AuthPage />}
+          {screen === "employee" && <EmployeePage />}
           {screen === "home" && <HomePage />}
           {screen === "review" && <Review />}
           {screen === "batchReview" && <BatchReview />}

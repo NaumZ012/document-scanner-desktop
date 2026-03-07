@@ -303,7 +303,22 @@ export function EmployeePage() {
                 </div>
               )}
 
-              {error && <div className={styles.error}>{error}</div>}
+              {error && (
+                <div className={styles.error}>
+                  {error}
+                  <button
+                    type="button"
+                    className={styles.skipLink}
+                    onClick={() => {
+                      setCurrentSessionUser({ id: null, name: "Owner" });
+                      setCurrentAppSessionId(null);
+                      setScreen("home");
+                    }}
+                  >
+                    Use app without session
+                  </button>
+                </div>
+              )}
 
               <button
                 type="button"

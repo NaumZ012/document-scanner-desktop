@@ -24,7 +24,7 @@ function getFileName(path: string): string {
 
 export function Home() {
   const { setScreen, setBatchInvoices, setBatchFailures, defaultDocumentType, defaultFolderId } = useApp();
-  const { error: showError, success: showSuccess } = useToast();
+  const { error: showError, success: showSuccess, showToast } = useToast();
   const [chosenDocumentType, setChosenDocumentType] = useState<DocumentType | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -91,6 +91,7 @@ export function Home() {
 
     scanInProgressRef.current = true;
     setIsProcessing(true);
+    showSuccess("Starting scan…");
     try {
       const successes: (InvoiceData & { source_file?: string; source_file_path?: string; _document_count?: number })[] = [];
       const failures: { file_path: string; file_name: string; error: string }[] = [];
@@ -149,19 +150,23 @@ export function Home() {
       if (failures.length > 0) {
         const summary = `${successes.length} од ${selectedFiles.length} документи успешно скенирани. ${failures.length} неуспешни.`;
         if (successes.length === 0 && failures[0]) {
-          showError(`${summary} Грешка: ${failures[0].error}`);
+          const errMsg = failures[0].error?.trim() || "Scan failed. Check Azure configuration and try again.";
+          showError(`${summary} Грешка: ${errMsg}`);
         } else {
           showSuccess(summary);
         }
       }
+      if (successes.length === 0 && failures.length === 0) {
+        showError("Scan did not complete. Please try again.");
+      }
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
-      showError(toFriendlyScanError(raw));
+      showError(toFriendlyScanError(raw) || "Scan failed. Please check your connection and Azure settings.");
     } finally {
       scanInProgressRef.current = false;
       setIsProcessing(false);
     }
-  }, [selectedFiles, setBatchInvoices, setScreen, showError, showSuccess, effectiveDocumentType, defaultFolderId]);
+  }, [selectedFiles, setBatchInvoices, setBatchFailures, setScreen, showError, showSuccess, showToast, effectiveDocumentType, defaultFolderId]);
 
   if (chosenDocumentType == null) {
     const typeDescriptions: Record<string, string> = {
