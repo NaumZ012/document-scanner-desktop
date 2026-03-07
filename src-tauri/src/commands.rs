@@ -153,31 +153,18 @@ pub fn open_app_data_folder(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn run_ocr(
-    file_path: String,
-    access_token: String,
-    employee_id: Option<String>,
-    app_session_id: Option<String>,
-) -> Result<crate::types::OcrResult, String> {
-    ocr::run_ocr_via_edge(&file_path, &access_token, employee_id.as_deref(), app_session_id.as_deref())
+pub fn run_ocr(file_path: String) -> Result<crate::types::OcrResult, String> {
+    ocr::run_ocr(&file_path)
 }
 
 #[tauri::command]
 pub async fn run_ocr_invoice(
     file_path: String,
     document_type: Option<String>,
-    access_token: String,
-    employee_id: Option<String>,
-    app_session_id: Option<String>,
 ) -> Result<crate::types::OcrInvoiceResult, String> {
     let path = file_path.clone();
     let doc_type = document_type.clone();
-    let token = access_token.clone();
-    let emp = employee_id.clone();
-    let app_sess = app_session_id.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        ocr::run_ocr_invoice_via_edge(&path, doc_type.as_deref(), &token, emp.as_deref(), app_sess.as_deref())
-    })
+    tauri::async_runtime::spawn_blocking(move || ocr::run_ocr_invoice(&path, doc_type.as_deref()))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -187,17 +174,11 @@ pub async fn run_ocr_invoice(
 pub async fn batch_scan_invoices(
     pdf_paths: Vec<String>,
     document_type: Option<String>,
-    access_token: String,
-    employee_id: Option<String>,
-    app_session_id: Option<String>,
 ) -> Result<BatchScanResult, String> {
     const CONCURRENCY: usize = 8;
     let mut successes = Vec::new();
     let mut failures = Vec::new();
     let doc_type = document_type.clone();
-    let token = access_token.clone();
-    let emp = employee_id.clone();
-    let app_sess = app_session_id.clone();
     
     for chunk in pdf_paths.chunks(CONCURRENCY) {
         let chunk_paths: Vec<(String, String)> = chunk
@@ -218,11 +199,8 @@ pub async fn batch_scan_invoices(
             .map(|(path, _)| {
                 let path = path.clone();
                 let doc_type = doc_type.clone();
-                let token = token.clone();
-                let emp = emp.clone();
-                let app_sess = app_sess.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    ocr::run_ocr_invoice_via_edge(&path, doc_type.as_deref(), &token, emp.as_deref(), app_sess.as_deref())
+                    ocr::run_ocr_invoice(&path, doc_type.as_deref())
                 })
             })
             .collect();
@@ -231,8 +209,8 @@ pub async fn batch_scan_invoices(
             match h.await {
                 Ok(Ok(res)) => {
                     let mut inv = res.invoice_data;
-                    // For batch flows, always align document_type with the user's choice on Home
-                    // so invoices scanned under "Фактури" never show up as Даночен биланс, etc.
+                    // Ensure document_type is populated for batch flows when the user selected
+                    // a specific document type on the Home screen (Фактури, Даночен биланс, ДДВ, Плати).
                     if let Some(ref dt) = doc_type {
                         let friendly = match dt.as_str() {
                             "smetka" => Some("Даночен биланс"),
@@ -242,15 +220,20 @@ pub async fn batch_scan_invoices(
                             _ => None,
                         };
                         if let Some(label) = friendly {
-                            inv
+                            let needs_set = inv
                                 .fields
-                                .insert(
+                                .get("document_type")
+                                .map(|v| v.value.trim().is_empty())
+                                .unwrap_or(true);
+                            if needs_set {
+                                inv.fields.insert(
                                     "document_type".to_string(),
                                     InvoiceFieldValue {
                                         value: label.to_string(),
                                         confidence: Some(1.0),
                                     },
                                 );
+                            }
                         }
                     }
                     inv.source_file = Some(filename.clone());

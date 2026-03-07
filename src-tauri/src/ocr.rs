@@ -1,6 +1,7 @@
 use crate::types::{InvoiceData, InvoiceFieldValue, OcrInvoiceResult, OcrLine, OcrResult};
-use reqwest::blocking::Client;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use lopdf::Document;
+use reqwest::blocking::Client;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -16,21 +17,6 @@ fn parse_ddv_amt(s: &str) -> f64 {
         return 0.0;
     }
     s.parse::<f64>().unwrap_or(0.0)
-}
-
-fn guess_mime_type(file_path: &str) -> &'static str {
-    match Path::new(file_path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("pdf") => "application/pdf",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("tif") | Some("tiff") => "image/tiff",
-        _ => "application/octet-stream",
-    }
 }
 
 fn count_pages_best_effort(file_path: &str) -> Option<u32> {
@@ -49,10 +35,83 @@ fn count_pages_best_effort(file_path: &str) -> Option<u32> {
     Some(1)
 }
 
-fn supabase_env() -> Result<(String, String), String> {
-    let url = std::env::var("VITE_SUPABASE_URL").map_err(|_| "VITE_SUPABASE_URL not set".to_string())?;
-    let anon = std::env::var("VITE_SUPABASE_ANON_KEY").map_err(|_| "VITE_SUPABASE_ANON_KEY not set".to_string())?;
-    Ok((url.trim_end_matches('/').to_string(), anon))
+fn azure_env() -> Result<(String, String), String> {
+    // 1) Runtime env / .env (development or power‑user override)
+    if let (Ok(endpoint), Ok(key)) = (
+        std::env::var("AZURE_OCR_ENDPOINT"),
+        std::env::var("AZURE_OCR_KEY"),
+    ) {
+        let endpoint_trimmed = endpoint.trim();
+        let key_trimmed = key.trim();
+        if !endpoint_trimmed.is_empty() && !key_trimmed.is_empty() {
+            return Ok((
+                endpoint_trimmed.trim_end_matches('/').to_string(),
+                key_trimmed.to_string(),
+            ));
+        }
+    }
+
+    // 2) Build‑time baked values for production builds.
+    // These are injected at compile time via environment variables
+    // AZURE_OCR_ENDPOINT_BUILD and AZURE_OCR_KEY_BUILD so the installer
+    // works for all clients without them configuring anything.
+    let endpoint_build = option_env!("AZURE_OCR_ENDPOINT_BUILD").unwrap_or("").trim();
+    let key_build = option_env!("AZURE_OCR_KEY_BUILD").unwrap_or("").trim();
+    if !endpoint_build.is_empty() && !key_build.is_empty() {
+        return Ok((
+            endpoint_build.trim_end_matches('/').to_string(),
+            key_build.to_string(),
+        ));
+    }
+
+    Err("AZURE_OCR_ENDPOINT / AZURE_OCR_KEY not set (and no build-time AZURE_OCR_*_BUILD configured).".to_string())
+}
+
+/// Analyzer ID for document type. Uses runtime env first (dev .env), then build-time
+/// (production). Set AZURE_CU_ANALYZER_*_BUILD when building the installer so production
+/// uses your custom analyzers (e.g. projectAnalyzer_...).
+fn pick_analyzer_id(document_type: Option<&str>) -> String {
+    let dt = document_type.unwrap_or("").trim();
+    let fallback_faktura = option_env!("AZURE_CU_ANALYZER_FAKTURA_BUILD")
+        .unwrap_or("")
+        .trim();
+    let fallback_smetka = option_env!("AZURE_CU_ANALYZER_SMETKA_BUILD")
+        .unwrap_or("")
+        .trim();
+    let fallback_generic = option_env!("AZURE_CU_ANALYZER_GENERIC_BUILD")
+        .unwrap_or("")
+        .trim();
+    let fallback_plata = option_env!("AZURE_CU_ANALYZER_PLATA_BUILD")
+        .unwrap_or("")
+        .trim();
+
+    if dt == "faktura" {
+        std::env::var("AZURE_CU_ANALYZER_FAKTURA")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| (!fallback_faktura.is_empty()).then(|| fallback_faktura.to_string()))
+            .unwrap_or_else(|| "prebuilt-invoice".to_string())
+    } else if dt == "smetka" {
+        std::env::var("AZURE_CU_ANALYZER_SMETKA")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| (!fallback_smetka.is_empty()).then(|| fallback_smetka.to_string()))
+            .unwrap_or_else(|| "prebuilt-document".to_string())
+    } else if dt == "generic" {
+        std::env::var("AZURE_CU_ANALYZER_GENERIC")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| (!fallback_generic.is_empty()).then(|| fallback_generic.to_string()))
+            .unwrap_or_else(|| "prebuilt-document".to_string())
+    } else if dt == "plata" {
+        std::env::var("AZURE_CU_ANALYZER_PLATA")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| (!fallback_plata.is_empty()).then(|| fallback_plata.to_string()))
+            .unwrap_or_else(|| "prebuilt-document".to_string())
+    } else {
+        "prebuilt-document".to_string()
+    }
 }
 
 fn fetch_poll_json_via_edge(
@@ -62,9 +121,19 @@ fn fetch_poll_json_via_edge(
     employee_id: Option<&str>,
     app_session_id: Option<&str>,
 ) -> Result<serde_json::Value, String> {
+    // These parameters are kept for API compatibility but no longer used for OCR.
+    let _ = (access_token, employee_id, app_session_id);
+
     load_env();
-    let (supabase_url, supabase_anon) = supabase_env()?;
-    let url = format!("{}/functions/v1/ocr_invoice", supabase_url);
+    let (azure_endpoint, azure_key) = azure_env()?;
+    let analyzer_id = pick_analyzer_id(document_type);
+    // Use Azure Content Understanding "content analyzers" REST endpoint with binary input.
+    // Works with both prebuilt analyzers (e.g. "prebuilt-invoice") and your custom
+    // projectAnalyzer_* IDs configured in .env.
+    let analyze_url = format!(
+        "{}/contentunderstanding/analyzers/{}:analyze?api-version=2025-11-01",
+        azure_endpoint, analyzer_id
+    );
 
     let bytes = fs::read(Path::new(file_path)).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -74,44 +143,26 @@ fn fetch_poll_json_via_edge(
         }
     })?;
 
-    let file_name = Path::new(file_path)
-        .file_name()
-        .and_then(|o| o.to_str())
-        .unwrap_or("")
-        .to_string();
-    let pages = count_pages_best_effort(file_path);
+    let _pages = count_pages_best_effort(file_path);
+
+    // Content Understanding API expects JSON body with base64-encoded input, not raw binary.
+    let b64 = BASE64.encode(&bytes);
+    let body_json = serde_json::json!({ "inputs": [{ "data": b64 }] });
+    let body_str = body_json.to_string();
 
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(180))
         .build()
         .map_err(|e| e.to_string())?;
 
-    let mut req = client
-        .post(&url)
-        .header("apikey", supabase_anon)
-        .header("Authorization", format!("Bearer {}", access_token))
-        .header("Content-Type", guess_mime_type(file_path))
-        .header("x-file-name", file_name);
-    if let Some(p) = pages {
-        req = req.header("x-pages", p.to_string());
-    }
-    if let Some(dt) = document_type {
-        if !dt.trim().is_empty() {
-            req = req.header("x-document-type", dt.trim());
-        }
-    }
-    if let Some(emp) = employee_id {
-        if !emp.trim().is_empty() {
-            req = req.header("x-employee-id", emp.trim());
-        }
-    }
-    if let Some(sid) = app_session_id {
-        if !sid.trim().is_empty() {
-            req = req.header("x-app-session-id", sid.trim());
-        }
-    }
-
-    let response = req.body(bytes).send().map_err(|e| {
+    // 1) Submit document to Azure Content Understanding
+    let response = client
+        .post(&analyze_url)
+        .header("Ocp-Apim-Subscription-Key", &azure_key)
+        .header("Content-Type", "application/json")
+        .body(body_str)
+        .send()
+        .map_err(|e| {
         if e.is_connect() || e.is_timeout() {
             "Check your internet connection and try again."
         } else {
@@ -121,9 +172,6 @@ fn fetch_poll_json_via_edge(
     })?;
 
     let status = response.status();
-    if status.as_u16() == 429 {
-        return Err("Rate limit reached. Please try again later.".to_string());
-    }
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
         if body.trim().is_empty() {
@@ -132,9 +180,59 @@ fn fetch_poll_json_via_edge(
         return Err(body);
     }
 
-    response
-        .json::<serde_json::Value>()
-        .map_err(|e| format!("Invalid JSON: {}", e))
+    let op_loc = response
+        .headers()
+        .get("Operation-Location")
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| "No Operation-Location from Azure".to_string())?
+        .to_string();
+
+    // 2) Poll Azure until the operation completes (max ~120s).
+    for _ in 0..120 {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let poll_resp = client
+            .get(&op_loc)
+            .header("Ocp-Apim-Subscription-Key", &azure_key)
+            .send()
+            .map_err(|e| {
+                if e.is_connect() || e.is_timeout() {
+                    "Check your internet connection and try again."
+                } else {
+                    "Network error."
+                }
+                .to_string()
+            })?;
+
+        let poll_status = poll_resp.status();
+        let poll_json: serde_json::Value = poll_resp
+            .json()
+            .map_err(|e| format!("Invalid JSON: {}", e))?;
+
+        let status_str = poll_json
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if status_str == "succeeded" {
+            return Ok(poll_json);
+        }
+        if status_str == "failed" {
+            let err = poll_json
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error");
+            return Err(format!("OCR analysis failed: {}", err));
+        }
+
+        // If Azure returns a non-success HTTP status during polling, surface it.
+        if !poll_status.is_success() && status_str.is_empty() {
+            return Err(format!("OCR failed ({})", poll_status));
+        }
+    }
+
+    Err("OCR timed out. Try again.".to_string())
 }
 
 pub fn run_ocr_via_edge(
@@ -198,6 +296,12 @@ pub fn run_ocr_via_edge(
         }
     }
     Err("OCR timed out. Try again.".to_string())
+}
+
+// Backwards-compatible wrapper used by Tauri commands.
+// Supabase-specific arguments are no longer needed, so we pass empty values.
+pub fn run_ocr(file_path: &str) -> Result<OcrResult, String> {
+    run_ocr_via_edge(file_path, "", None, None)
 }
 
 /// MIS-02 built fields: CustomerName, InvoiceId, InvoiceTotal, SubTotal, DDV, VendorName, InvoiceDate, and Item/Item2..Item10 (→ single Опис).
@@ -2186,4 +2290,13 @@ pub fn run_ocr_invoice_via_edge(
         }
     }
     Err("OCR timed out. Try again.".to_string())
+}
+
+// Backwards-compatible wrapper used by Tauri commands.
+// Supabase-specific arguments are no longer needed, so we pass empty values.
+pub fn run_ocr_invoice(
+    file_path: &str,
+    document_type: Option<&str>,
+) -> Result<OcrInvoiceResult, String> {
+    run_ocr_invoice_via_edge(file_path, document_type, "", None, None)
 }

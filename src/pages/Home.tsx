@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Receipt, Calculator, Percent, CreditCard, Upload, FileText, X, LucideIcon } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
-import { runOcrInvoice, addHistoryRecord, buildExtractedDataFromInvoiceFields } from "@/services/api";
+import { runOcrInvoice } from "@/services/api";
 import { DOCUMENT_TYPE_CHOICES } from "@/shared/constants";
 import type { DocumentType, InvoiceData } from "@/shared/types";
 import styles from "./Home.module.css";
@@ -99,19 +99,6 @@ export function Home() {
         const fileName = getFileName(path);
         try {
           const invoiceData = await runOcrInvoice(path, effectiveDocumentType);
-          const docType = invoiceData.fields.document_type?.value ?? effectiveDocumentType;
-          const extractedData = buildExtractedDataFromInvoiceFields(invoiceData.fields);
-          try {
-            await addHistoryRecord({
-              document_type: docType,
-              file_path_or_name: fileName,
-              extracted_data: extractedData,
-              status: "pending",
-              folder_id: defaultFolderId ?? undefined,
-            });
-          } catch {
-            // history failure is non-fatal
-          }
           successes.push({
             ...invoiceData,
             source_file: fileName,

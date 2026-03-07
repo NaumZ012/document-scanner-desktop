@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type { OcrResult, InvoiceData, OcrInvoiceResult } from "@/shared/types";
 import type { ExtractedField } from "@/shared/types";
 import { parseAzureExtraction, parseAzureFieldsWithConfidence } from "@/utils/parseAzureExtraction";
-import { getSupabaseClient } from "@/services/supabaseClient";
 
 /** Build extracted_data payload for history: key-value plus _confidence so the Review page can show confidence %. */
 export function buildExtractedDataWithConfidence(fields: ExtractedField[]): Record<string, unknown> {
@@ -51,67 +50,13 @@ export async function clearLearnedMappings(): Promise<number> {
 }
 
 export async function runOcr(filePath: string): Promise<OcrResult> {
-  const supabase = getSupabaseClient();
-  const { data } = await supabase!.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error("Not authenticated.");
-
-  const employeeId = (() => {
-    try {
-      const raw = sessionStorage.getItem("document-scanner-current-session-user");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { id?: string | null };
-      return parsed?.id ?? null;
-    } catch {
-      return null;
-    }
-  })();
-  const appSessionId = (() => {
-    try {
-      return sessionStorage.getItem("document-scanner-current-app-session-id");
-    } catch {
-      return null;
-    }
-  })();
-
-  return invoke<OcrResult>("run_ocr", {
-    filePath,
-    accessToken: token,
-    employeeId,
-    appSessionId,
-  });
+  return invoke<OcrResult>("run_ocr", { filePath });
 }
 
 export async function runOcrInvoice(filePath: string, documentType?: string): Promise<InvoiceData> {
-  const supabase = getSupabaseClient();
-  const { data } = await supabase!.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error("Not authenticated.");
-
-  const employeeId = (() => {
-    try {
-      const raw = sessionStorage.getItem("document-scanner-current-session-user");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { id?: string | null };
-      return parsed?.id ?? null;
-    } catch {
-      return null;
-    }
-  })();
-  const appSessionId = (() => {
-    try {
-      return sessionStorage.getItem("document-scanner-current-app-session-id");
-    } catch {
-      return null;
-    }
-  })();
-
   const result = await invoke<OcrInvoiceResult>("run_ocr_invoice", {
     filePath,
     documentType: documentType ?? null,
-    accessToken: token,
-    employeeId,
-    appSessionId,
   });
 
   const hasRaw = result?.raw_azure_fields != null && typeof result.raw_azure_fields === "object" && !Array.isArray(result.raw_azure_fields);
@@ -203,35 +148,9 @@ export async function runOcrInvoice(filePath: string, documentType?: string): Pr
 }
 
 export async function batchScanInvoices(pdfPaths: string[], documentType?: string): Promise<import("@/shared/types").BatchScanResult> {
-  const supabase = getSupabaseClient();
-  const { data } = await supabase!.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error("Not authenticated.");
-
-  const employeeId = (() => {
-    try {
-      const raw = sessionStorage.getItem("document-scanner-current-session-user");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { id?: string | null };
-      return parsed?.id ?? null;
-    } catch {
-      return null;
-    }
-  })();
-  const appSessionId = (() => {
-    try {
-      return sessionStorage.getItem("document-scanner-current-app-session-id");
-    } catch {
-      return null;
-    }
-  })();
-
   return invoke<import("@/shared/types").BatchScanResult>("batch_scan_invoices", {
     pdfPaths,
     documentType: documentType ?? null,
-    accessToken: token,
-    employeeId,
-    appSessionId,
   });
 }
 
