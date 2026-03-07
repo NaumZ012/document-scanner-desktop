@@ -3,6 +3,14 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
+/**
+ * Single Supabase client used by the whole app. It is initialized with the anon key and
+ * auth options (persistSession, autoRefreshToken). Once the user signs in, the client
+ * stores the session and automatically attaches the JWT to every request (.from(), .rpc(),
+ * .functions.invoke()). All table queries must filter by owner_id = auth.uid() (or, for
+ * profiles, by id = auth.uid()) so RLS can enforce the same.
+ */
+
 export type Database = {
   public: {
     Tables: {
@@ -64,18 +72,24 @@ export type Database = {
           employee_id: string | null;
           started_at: string | null;
           ended_at: string | null;
+          device_id: string | null;
+          device_label: string | null;
         };
         Insert: {
           id?: string;
           owner_id: string;
           employee_id?: string | null;
-          started_at?: string;
+          started_at?: string | null;
           ended_at?: string | null;
+          device_id?: string | null;
+          device_label?: string | null;
         };
         Update: {
           employee_id?: string | null;
           started_at?: string | null;
           ended_at?: string | null;
+          device_id?: string | null;
+          device_label?: string | null;
         };
         Relationships: [];
       };
@@ -136,6 +150,82 @@ export type Database = {
         };
         Relationships: [];
       };
+      scan_events: {
+        Row: {
+          id: string;
+          owner_id: string;
+          session_id: string | null;
+          created_at: string | null;
+          document_type: string | null;
+          file_name: string | null;
+          pages: number | null;
+          status: string;
+          duration_ms: number | null;
+          error_message: string | null;
+        };
+        Insert: {
+          id?: string;
+          owner_id: string;
+          session_id?: string | null;
+          created_at?: string | null;
+          document_type?: string | null;
+          file_name?: string | null;
+          pages?: number | null;
+          status: string;
+          duration_ms?: number | null;
+          error_message?: string | null;
+        };
+        Update: {
+          session_id?: string | null;
+          document_type?: string | null;
+          file_name?: string | null;
+          pages?: number | null;
+          status?: string;
+          duration_ms?: number | null;
+          error_message?: string | null;
+        };
+        Relationships: [];
+      };
+      scans: {
+        Row: {
+          id: string;
+          owner_id: string;
+          employee_id: string | null;
+          session_id: string | null;
+          document_type: string;
+          file_name: string | null;
+          pages: number | null;
+          status: string;
+          ocr_model: string | null;
+          excel_profile_id: string | null;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          owner_id: string;
+          employee_id?: string | null;
+          session_id?: string | null;
+          document_type: string;
+          file_name?: string | null;
+          pages?: number | null;
+          status?: string;
+          ocr_model?: string | null;
+          excel_profile_id?: string | null;
+          created_at?: string | null;
+        };
+        Update: {
+          employee_id?: string | null;
+          session_id?: string | null;
+          document_type?: string;
+          file_name?: string | null;
+          pages?: number | null;
+          status?: string;
+          ocr_model?: string | null;
+          excel_profile_id?: string | null;
+          created_at?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -160,6 +250,7 @@ export function getSupabaseClient(): SupabaseClient<Database> | null {
         autoRefreshToken: true,
       },
     }) as SupabaseClient<Database>;
+    // Session (and JWT) is sent on every request automatically when the user is signed in.
   }
   return client;
 }

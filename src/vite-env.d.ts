@@ -1,5 +1,15 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+  readonly VITE_SUPABASE_URL: string;
+  readonly VITE_SUPABASE_ANON_KEY: string;
+  readonly TAURI_DEBUG?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 declare module "bcryptjs" {
   export function hash(s: string, rounds: number): Promise<string>;
   export function hash(s: string, rounds: number, callback: (err: Error | null, hash: string) => void): void;

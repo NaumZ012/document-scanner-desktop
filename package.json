@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:build:production": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/tauri-build-production.ps1",
     "kill-app": "node scripts/kill-app.js",
     "tauri:dev": "npm run kill-app && tauri dev",
     "excel:dump": "cd src-tauri && cargo run --bin dump_excel -- --all"

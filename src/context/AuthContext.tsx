@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabaseClient, type Database } from "@/services/supabaseClient";
+import { logAuditEvent } from "@/services/audit";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
@@ -16,6 +17,16 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+function toFriendlyAuthError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("invalid login") || m.includes("invalid credentials")) return "Invalid email or password.";
+  if (m.includes("email not confirmed")) return "Please confirm your email address and try again.";
+  if (m.includes("user already registered")) return "An account with this email already exists. Sign in instead.";
+  if (m.includes("password")) return "Please check your password and try again.";
+  if (m.includes("network") || m.includes("fetch")) return "Network error. Check your connection and try again.";
+  return message;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = getSupabaseClient();
@@ -52,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const loadProfile = async (userId: string) => {
       try {
+        // profiles.id = auth.uid(); RLS allows only own row.
         const { data, error } = await supabase
           .from("profiles")
           .select("*")
@@ -153,52 +165,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         "Sign up timed out. Please check your internet connection and try again.",
       );
       if (error) {
-        return { error: error.message };
+        return { error: toFriendlyAuthError(error.message) };
       }
       return {};
     } catch (e) {
-      if (e instanceof Error) {
-        return { error: e.message };
-      }
-      return { error: "Sign up failed. Please try again." };
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: toFriendlyAuthError(msg) || "Sign up failed. Please try again." };
     }
   };
 
   const signIn: AuthContextValue["signIn"] = async ({ email, password }) => {
     const client = getSupabaseClient();
-    if (!client) return { error: "Supabase is not configured." };
+    if (!client) return { error: "Service is not configured. Please try again later." };
     try {
       const { error } = await withAuthTimeout(
-        client.auth.signInWithPassword({
-          email,
-          password,
-        }),
+        client.auth.signInWithPassword({ email, password }),
         "Sign in timed out. Please check your internet connection and try again.",
       );
       if (error) {
-        return { error: error.message };
+        return { error: toFriendlyAuthError(error.message) };
       }
       return {};
     } catch (e) {
-      if (e instanceof Error) {
-        return { error: e.message };
-      }
-      return { error: "Sign in failed. Please try again." };
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: toFriendlyAuthError(msg) || "Sign in failed. Please try again." };
     }
   };
 
   const signOut = async () => {
-    setSession(null);
-    setUser(null);
-    setProfile(null);
     const client = getSupabaseClient();
     if (client) {
       try {
+        const { data } = await client.auth.getSession();
+        if (data.session?.access_token) {
+          await logAuditEvent({ eventType: "logout", accessToken: data.session.access_token });
+        }
         await client.auth.signOut();
       } catch {
-        // Already cleared local state; app will show auth screen
+        // Proceed to clear local state
       }
     }
+    setSession(null);
+    setUser(null);
+    setProfile(null);
   };
 
   const refreshProfile = async () => {
@@ -207,7 +216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data, error } = await client
       .from("profiles")
       .select("*")
-      .eq("id", user.id)
+      .eq("id", user.id) // profiles.id = auth.uid()
       .single();
     if (error) return;
     setProfile(data as Profile);

@@ -33,16 +33,24 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    // Non-blocking: just notify when an update exists. Install is user-driven via relaunch later.
+    // On launch: silently check for updates in the background. Do not block the app.
     let cancelled = false;
     (async () => {
       try {
         const updater = await import("@tauri-apps/plugin-updater");
         const update = await updater.check();
-        if (cancelled) return;
-        if (update) {
-          showToast(`Update available: ${update.version}`, "info");
-        }
+        if (cancelled || !update) return;
+
+        showToast(`Update ${update.version} available. Restart to install.`, "info", {
+          action: {
+            label: "Download and restart",
+            onAction: async () => {
+              showToast("Installing update…", "info");
+              await update.downloadAndInstall();
+              // Tauri will relaunch the app after install.
+            },
+          },
+        });
       } catch {
         // Ignore updater errors (offline, not in Tauri, misconfigured endpoints)
       }

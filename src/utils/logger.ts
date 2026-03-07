@@ -7,25 +7,22 @@ interface LogMeta {
 const isDev = import.meta.env.DEV ?? false;
 
 function baseLog(level: LogLevel, message: string, meta?: LogMeta) {
+  if (!isDev) return;
   const payload = meta && Object.keys(meta).length > 0 ? meta : undefined;
-  const entry = {
-    level,
-    message,
-    meta: payload,
-    timestamp: new Date().toISOString(),
-  };
-
-  // In development, always log to the console for easier debugging.
-  if (isDev) {
-    // eslint-disable-next-line no-console
-    console[level === "debug" ? "debug" : level](entry);
-    return;
+  const entry = { level, message, meta: payload, timestamp: new Date().toISOString() };
+  switch (level) {
+    case "debug":
+      console.debug(entry);
+      break;
+    case "info":
+      console.info(entry);
+      break;
+    case "warn":
+      console.warn(entry);
+      break;
+    default:
+      console.error(entry);
   }
-
-  // In production we can later route this to a file, telemetry, or keep as a
-  // thin wrapper around console.
-  // eslint-disable-next-line no-console
-  console[level === "debug" ? "debug" : level](entry);
 }
 
 export const logger = {

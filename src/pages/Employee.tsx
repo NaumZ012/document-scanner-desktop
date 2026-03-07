@@ -50,6 +50,7 @@ export function EmployeePage() {
     let active = true;
     (async () => {
       try {
+        // RLS enforces owner_id = auth.uid(); explicit filter for defense in depth.
         const { data, error } = await withTimeout(
           supabase
             .from("employees")
@@ -66,14 +67,10 @@ export function EmployeePage() {
           const rows = (Array.isArray(data) ? data : []) as Array<{ id: string; name: string }>;
           setEmployees(rows.map((r) => ({ id: r.id, name: r.name })));
         }
-      } catch (e) {
+      } catch {
         if (!active) return;
         setEmployees([]);
-        setError(
-          e instanceof Error
-            ? e.message
-            : "Could not load employees. Please check your internet connection and try again.",
-        );
+        setError("Could not load employees. Please check your connection and try again.");
       } finally {
         if (active) setLoadingList(false);
       }
@@ -90,11 +87,11 @@ export function EmployeePage() {
     try {
       const supabase = getSupabaseClient();
       if (!supabase) {
-        setError("Supabase is not configured.");
+        setError("Service is not configured. Please try again later.");
         return;
       }
       if (!user || !session?.access_token) {
-        setError("Not authenticated.");
+        setError("Please sign in again and try again.");
         return;
       }
 
@@ -123,7 +120,7 @@ export function EmployeePage() {
       );
 
       if (error) {
-        setError(error.message || "Could not start session.");
+        setError("Could not start session. Please check your PIN and try again.");
         return;
       }
 
@@ -144,8 +141,8 @@ export function EmployeePage() {
         setCurrentSessionUser({ id: null, name: "Owner" });
       }
       setScreen("home");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unexpected error while selecting employee. Please try again.");
+    } catch {
+      setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }

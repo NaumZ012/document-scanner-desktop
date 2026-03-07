@@ -16,11 +16,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     message: undefined,
   };
 
-  static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
-    return {
-      hasError: true,
-      message: error instanceof Error ? error.message : String(error),
-    };
+  static getDerivedStateFromError(_error: unknown): ErrorBoundaryState {
+    return { hasError: true, message: undefined };
   }
 
   componentDidCatch(error: unknown, errorInfo: unknown) {
@@ -53,21 +50,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <p style={{ maxWidth: 520, opacity: 0.8, fontSize: "0.9rem" }}>
             Затвори го прозорецот или кликни на копчето подолу за да се обидеш повторно.
           </p>
-          {this.state.message && (
-            <pre
-              style={{
-                maxWidth: 520,
-                maxHeight: 140,
-                overflow: "auto",
-                background: "rgba(0,0,0,0.05)",
-                borderRadius: 8,
-                padding: "0.5rem 0.75rem",
-                fontSize: "0.75rem",
-              }}
-            >
-              {this.state.message}
-            </pre>
-          )}
           <button
             type="button"
             onClick={this.handleReload}

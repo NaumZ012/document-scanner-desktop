@@ -56,28 +56,30 @@ export function AdminPage() {
     const load = async () => {
       try {
         if (tab === "api_calls") {
+          // RLS enforces owner_id = auth.uid(); client filter for non-admins for defense in depth.
           let q = supabase.from("api_calls").select("*").order("called_at", { ascending: false }).limit(200);
           if (!isAdmin) q = q.eq("owner_id", user.id);
           const { data, error } = await q;
           if (error) {
-            setError(error.message);
+            setError("Could not load API calls. Please try again later.");
             setApiCalls([]);
             return;
           }
           setApiCalls((Array.isArray(data) ? (data as any[]) : []) as ApiCallRow[]);
         } else {
+          // RLS enforces owner_id = auth.uid(); client filter for non-admins for defense in depth.
           let q = supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(200);
           if (!isAdmin) q = q.eq("owner_id", user.id);
           const { data, error } = await q;
           if (error) {
-            setError(error.message);
+            setError("Could not load audit log. Please try again later.");
             setAuditLog([]);
             return;
           }
           setAuditLog((Array.isArray(data) ? (data as any[]) : []) as AuditLogRow[]);
         }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load admin data.");
+      } catch {
+        setError("Failed to load data. Please try again later.");
       } finally {
         setLoading(false);
       }

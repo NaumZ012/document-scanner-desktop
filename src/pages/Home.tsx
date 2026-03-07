@@ -5,8 +5,10 @@ import { Receipt, Calculator, Percent, CreditCard, Upload, FileText, X, LucideIc
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
 import { runOcrInvoice } from "@/services/api";
+import { logAuditEvent, checkRateLimitBeforeScan } from "@/services/audit";
 import { DOCUMENT_TYPE_CHOICES } from "@/shared/constants";
 import type { DocumentType, InvoiceData } from "@/shared/types";
+import { toFriendlyScanError } from "@/utils/friendlyErrors";
 import styles from "./Home.module.css";
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -80,6 +82,13 @@ export function Home() {
   const handleScanAll = useCallback(async () => {
     if (selectedFiles.length === 0) return;
     if (scanInProgressRef.current) return;
+
+    const { allowed, message } = await checkRateLimitBeforeScan();
+    if (!allowed) {
+      showError(message ?? "Too many requests. Please try again later.");
+      return;
+    }
+
     scanInProgressRef.current = true;
     setIsProcessing(true);
     try {
@@ -90,8 +99,6 @@ export function Home() {
       let index = 0;
 
       const processNext = async () => {
-        // Simple work queue: grab next index until we exhaust selectedFiles.
-        // JS is single-threaded so this increment is safe enough here.
         const current = index;
         if (current >= selectedFiles.length) return;
         index += 1;
@@ -104,8 +111,10 @@ export function Home() {
             source_file: fileName,
             source_file_path: path,
           });
-          // Sort so PDFs that likely contain multiple documents (Azure detected >1 document)
-          // are shown last in the scanned list on BatchReview.
+          logAuditEvent({
+            eventType: "scan_completed",
+            metadata: { file_name: fileName, document_type: effectiveDocumentType },
+          });
           const sortedSuccesses = [...successes].sort((a: any, b: any) => {
             const aMulti = (a._document_count ?? 1) > 1;
             const bMulti = (b._document_count ?? 1) > 1;
@@ -119,14 +128,14 @@ export function Home() {
             setScreen("batchReview");
           }
         } catch (e) {
+          const raw = e instanceof Error ? e.message : String(e);
           failures.push({
             file_path: path,
             file_name: fileName,
-            error: e instanceof Error ? e.message : String(e),
+            error: toFriendlyScanError(raw),
           });
           setBatchFailures([...failures] as any);
         }
-        // Recurse to pick up the next job in this worker.
         await processNext();
       };
 
@@ -146,7 +155,8 @@ export function Home() {
         }
       }
     } catch (e) {
-      showError(e instanceof Error ? e.message : String(e));
+      const raw = e instanceof Error ? e.message : String(e);
+      showError(toFriendlyScanError(raw));
     } finally {
       scanInProgressRef.current = false;
       setIsProcessing(false);

@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { runOcrInvoice, addHistoryRecord, buildExtractedDataWithConfidence } from "@/services/api";
 import { useApp } from "@/context/AppContext";
 import { useToast } from "@/context/ToastContext";
+import { toFriendlyScanError } from "@/utils/friendlyErrors";
 import { invoiceDataToFields } from "@/utils/invoiceDataToFields";
 import { logger } from "@/utils/logger";
 import styles from "./DragDrop.module.css";
@@ -100,12 +101,9 @@ export function DragDrop() {
         });
         setScreen("review");
       } catch (e) {
-        logger.error("scan:error", {
-          scanId,
-          filePath,
-          error: e instanceof Error ? e.message : String(e),
-        });
-        showError(e instanceof Error ? e.message : String(e));
+        const raw = e instanceof Error ? e.message : String(e);
+        logger.error("scan:error", { scanId, filePath, error: raw });
+        showError(toFriendlyScanError(raw));
       } finally {
         setLoading(false);
       }
